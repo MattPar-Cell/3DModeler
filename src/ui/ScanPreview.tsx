@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import type { ProjectedOutline } from '../scan/project.ts';
 import type { ScanView } from '../state/scanStore.ts';
+import type { Seed } from '../scan/segment.ts';
 import type { ReferencePoint } from '../state/scanStore.ts';
 
 /**
@@ -21,6 +22,8 @@ export interface ScanPreviewProps {
   /** Outline of the reconstruction, drawn over the photo when available. */
   readonly outline: ProjectedOutline | null;
   readonly onPick: ((point: ReferencePoint) => void) | undefined;
+  /** Operator corrections to draw. */
+  readonly seeds: readonly Seed[];
 }
 
 const MASK_TINT = { r: 79, g: 199, b: 199 };
@@ -31,6 +34,7 @@ export function ScanPreview({
   referencePoints,
   outline,
   onPick,
+  seeds,
 }: ScanPreviewProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -98,6 +102,25 @@ export function ScanPreview({
       }
     }
 
+    // Operator corrections: filled for subject, hollow for background.
+    for (const seed of seeds) {
+      const radius = Math.max(4, image.width / 110);
+      context.lineWidth = Math.max(1.5, image.width / 320);
+      context.beginPath();
+      context.arc(seed.x, seed.y, radius, 0, Math.PI * 2);
+      if (seed.kind === 'subject') {
+        context.fillStyle = 'rgba(110, 231, 168, 0.9)';
+        context.fill();
+        context.strokeStyle = '#0d1116';
+        context.stroke();
+      } else {
+        context.fillStyle = 'rgba(20, 22, 26, 0.75)';
+        context.fill();
+        context.strokeStyle = '#ff8a7a';
+        context.stroke();
+      }
+    }
+
     // The reference line, if one is being drawn.
     if (referencePoints.length > 0) {
       context.strokeStyle = '#6ee7a8';
@@ -116,7 +139,7 @@ export function ScanPreview({
         context.fill();
       }
     }
-  }, [view, landmarks, referencePoints, outline]);
+  }, [view, landmarks, referencePoints, outline, seeds]);
 
   return (
     <canvas

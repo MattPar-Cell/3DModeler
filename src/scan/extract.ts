@@ -29,11 +29,10 @@ import type { BodyMeasurements } from '../body/spec.ts';
  * is worse than no measurement.
  */
 
-/** Something the operator should know about a scan's reliability. */
-export interface ScanNote {
-  readonly severity: 'info' | 'warning';
-  readonly text: string;
-}
+import { checkBodyOutline, checkRatios, checkViewsMatch } from './plausibility.ts';
+import type { ScanNote } from './plausibility.ts';
+
+export type { ScanNote };
 
 export interface LampScan {
   readonly measurements: LampMeasurements;
@@ -226,9 +225,22 @@ export interface BodyScanInput {
  */
 export function extractBody(input: BodyScanInput): BodyScan {
   const { front, cmPerPixel } = input;
-  const notes = commonNotes(front);
+  const notes = [...commonNotes(front)];
   const heightPx = silhouetteHeightPx(front);
   const stature = heightPx * cmPerPixel;
+
+  /**
+   * Before anything is measured, does this outline even look like a person?
+   *
+   * Skipping this check is how a mask running from a forehead to a pair of
+   * knees produced a full table of confident numbers. When the outline is not
+   * a body, the only honest output is none.
+   */
+  const outline = checkBodyOutline(front);
+  notes.push(...outline.notes);
+  if (!outline.usable) {
+    return { measurements: {}, notes, landmarks: [] };
+  }
 
   const crotchT = findCrotch(front);
   if (crotchT === undefined) {
@@ -238,8 +250,15 @@ export function extractBody(input: BodyScanInput): BodyScan {
     });
   }
 
+  // A side view is only a depth measurement if it is the same pose at the same
+  // crop. Otherwise it is a photograph of the same person and nothing more.
+  let side = input.side;
+  if (side !== undefined) {
+    const match = checkViewsMatch(front, side);
+    notes.push(...match.notes);
+    if (!match.usable) side = undefined;
+  }
   const sideScale = input.sideCmPerPixel ?? cmPerPixel;
-  const side = input.side;
 
   const chestT = landmarkFraction(A.CHEST_HEIGHT, crotchT);
   const waistT = landmarkFraction(A.WAIST_HEIGHT, crotchT);
@@ -296,6 +315,7 @@ export function extractBody(input: BodyScanInput): BodyScan {
     hipT,
     biasedSection(A.HIP_ASPECT, A.HIP_FRONT_BIAS, A.HIP_BACK_BIAS, A.TORSO_SQUARENESS),
   );
+
   // The neck has no fixed height — it is the narrowest point between the
   // shoulders and the jaw. Sampled at a landmark fraction instead it comes back
   // as shoulder width, which on a real subject read as a 125 cm neck.
@@ -329,7 +349,7 @@ export function extractBody(input: BodyScanInput): BodyScan {
   const shoulderWidth =
     (widthAtFraction(front, shoulderT) * cmPerPixel) / BIDELTOID_OVER_SHOULDER_TAPE;
 
-  const measurements: BodyMeasurements = {
+  const candidate: BodyMeasurements = {
     stature,
     shoulderWidth,
     ...(crotchT === undefined ? {} : { inseam: crotchT * stature }),
@@ -343,6 +363,29 @@ export function extractBody(input: BodyScanInput): BodyScan {
       : {}),
   };
 
+  /**
+   * Last gate: are these numbers consistent with each other?
+   *
+   * Every one is checked against its plausible ratio to the stature it was
+   * taken alongside. A mask that lost the legs makes the stature wrong, scales
+   * everything else by the same wrong number, and lands the ratios somewhere no
+   * body goes — which is detectable without knowing what went wrong upstream.
+   */
+  const ratios = checkRatios(candidate);
+  notes.push(...ratios.notes);
+  const measurements: BodyMeasurements = Object.fromEntries(
+    Object.entries(candidate).filter(
+      ([key]) => !ratios.implausible.includes(key as keyof BodyMeasurements),
+    ),
+  );
+
+  if (ratios.implausible.length >= 2) {
+    notes.push({
+      severity: 'warning',
+      text: 'Several measurements are impossible for a body of the height entered, which almost always means the outline is wrong rather than the subject unusual. Check that the tinted region covers the whole subject — head to heels — before trusting anything here.',
+    });
+  }
+
   // A silhouette says nothing about mass, and guessing it would be the one
   // number in the set with no observation behind it at all.
   notes.push({
@@ -350,20 +393,17 @@ export function extractBody(input: BodyScanInput): BodyScan {
     text: 'Weight cannot be read from an outline. Enter it in the body workspace and the fit will use it to pull the un-measured girths to the right build.',
   });
 
+  const reported = (key: keyof BodyMeasurements): boolean => measurements[key] !== undefined;
   return {
     measurements,
     notes,
     landmarks: [
-      { label: 'Shoulders', t: shoulderT },
-      ...(armsClear && neckFound ? [{ label: 'Neck', t: neckPinch.t }] : []),
-      ...(armsClear
-        ? [
-            { label: 'Chest', t: chest.t },
-            { label: 'Waist', t: waist.t },
-            { label: 'Hip', t: hip.t },
-          ]
-        : []),
-      ...(crotchT === undefined ? [] : [{ label: 'Crotch', t: crotchT }]),
+      ...(reported('shoulderWidth') ? [{ label: 'Shoulders', t: shoulderT }] : []),
+      ...(armsClear && neckFound && reported('neck') ? [{ label: 'Neck', t: neckPinch.t }] : []),
+      ...(armsClear && reported('chest') ? [{ label: 'Chest', t: chest.t }] : []),
+      ...(armsClear && reported('waist') ? [{ label: 'Waist', t: waist.t }] : []),
+      ...(armsClear && reported('hip') ? [{ label: 'Hip', t: hip.t }] : []),
+      ...(crotchT === undefined || !reported('inseam') ? [] : [{ label: 'Crotch', t: crotchT }]),
     ],
   };
 }

@@ -39,6 +39,7 @@ export function ScanWorkspace() {
   const knownHeightCm = useScanStore((s) => s.knownHeightCm);
   const referenceCm = useScanStore((s) => s.referenceCm);
   const referencePoints = useScanStore((s) => s.referencePoints);
+  const clickMode = useScanStore((s) => s.clickMode);
   const busy = useScanStore((s) => s.busy);
   const error = useScanStore((s) => s.error);
   const setSubject = useScanStore((s) => s.setSubject);
@@ -47,6 +48,9 @@ export function ScanWorkspace() {
   const setKnownHeight = useScanStore((s) => s.setKnownHeight);
   const setReferenceCm = useScanStore((s) => s.setReferenceCm);
   const addReferencePoint = useScanStore((s) => s.addReferencePoint);
+  const setClickMode = useScanStore((s) => s.setClickMode);
+  const addSeed = useScanStore((s) => s.addSeed);
+  const clearSeeds = useScanStore((s) => s.clearSeeds);
   const clearReference = useScanStore((s) => s.clearReference);
   const loadView = useScanStore((s) => s.loadView);
   const clearView = useScanStore((s) => s.clearView);
@@ -105,7 +109,16 @@ export function ScanWorkspace() {
     [preview],
   );
 
-  const picking = scaleMode === 'reference';
+  /**
+   * What a click on a preview does, given the current mode. The reference line
+   * and the correction marks share the canvas, so only one can be live.
+   */
+  const pickerFor = (slot: 'front' | 'side'): ((point: { x: number; y: number }) => void) | undefined => {
+    if (clickMode === 'reference') return slot === 'front' ? addReferencePoint : undefined;
+    if (clickMode === 'subject') return (point) => addSeed(slot, { ...point, kind: 'subject' });
+    if (clickMode === 'background') return (point) => addSeed(slot, { ...point, kind: 'background' });
+    return undefined;
+  };
 
   return (
     <>
@@ -183,6 +196,48 @@ export function ScanWorkspace() {
                 />
                 <span className="slider-value">{sensitivity.toFixed(2)}×</span>
               </div>
+
+              <p className="hint" style={{ marginTop: 12 }}>
+                Where the slider cannot separate them — tanned legs against pale sand, dark hair
+                against wet rock — click the picture instead. A mark on a missed limb keeps it; a
+                mark on something that is not the subject drops it.
+              </p>
+              <div className="buttons">
+                <button
+                  type="button"
+                  className={clickMode === 'subject' ? 'primary' : 'secondary'}
+                  aria-pressed={clickMode === 'subject'}
+                  onClick={() => setClickMode(clickMode === 'subject' ? 'none' : 'subject')}
+                >
+                  Mark subject
+                </button>
+                <button
+                  type="button"
+                  className={clickMode === 'background' ? 'primary' : 'secondary'}
+                  aria-pressed={clickMode === 'background'}
+                  onClick={() => setClickMode(clickMode === 'background' ? 'none' : 'background')}
+                >
+                  Mark background
+                </button>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => {
+                    clearSeeds('front');
+                    clearSeeds('side');
+                  }}
+                  disabled={front.seeds.length === 0 && (side?.seeds.length ?? 0) === 0}
+                >
+                  Clear marks
+                </button>
+              </div>
+              {front.seeds.length > 0 && (
+                <p className="note" style={{ marginTop: 8 }}>
+                  {front.seeds.filter((s) => s.kind === 'subject').length} subject and{' '}
+                  {front.seeds.filter((s) => s.kind === 'background').length} background marks on the
+                  front view.
+                </p>
+              )}
             </div>
 
             <div className="section">
@@ -325,7 +380,8 @@ export function ScanWorkspace() {
               landmarks={scan?.result.landmarks ?? []}
               referencePoints={referencePoints}
               outline={outline}
-              onPick={picking ? addReferencePoint : undefined}
+              onPick={pickerFor('front')}
+              seeds={front.seeds}
             />
             {side !== null && subject === 'body' && (
               <ScanPreview
@@ -333,7 +389,8 @@ export function ScanWorkspace() {
                 landmarks={[]}
                 referencePoints={[]}
                 outline={null}
-                onPick={undefined}
+                onPick={pickerFor('side')}
+                seeds={side.seeds}
               />
             )}
           </div>

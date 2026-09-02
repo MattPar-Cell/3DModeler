@@ -14,6 +14,7 @@ export type BodyMeasurementKey =
   | 'stature'
   | 'mass'
   | 'chest'
+  | 'underbust'
   | 'waist'
   | 'hip'
   | 'inseam'
@@ -27,7 +28,6 @@ export type BodyMeasurementKey =
 /** Every parameter the body builder needs. */
 export type BodyParamKey =
   | BodyMeasurementKey
-  | 'underbust'
   | 'knee'
   | 'calf'
   | 'ankle'
@@ -48,7 +48,7 @@ export const BODY_MEASUREMENT_GROUPS: readonly {
   readonly keys: readonly BodyMeasurementKey[];
 }[] = [
   { title: 'Overall', keys: ['stature', 'mass'] },
-  { title: 'Torso', keys: ['chest', 'waist', 'hip', 'neck', 'shoulderWidth'] },
+  { title: 'Torso', keys: ['chest', 'underbust', 'waist', 'hip', 'neck', 'shoulderWidth'] },
   { title: 'Limbs', keys: ['inseam', 'thigh', 'bicep', 'forearmLength', 'wrist'] },
 ];
 
@@ -183,7 +183,8 @@ export const BODY_PARAM_SPECS: { readonly [K in BodyParamKey]: ParamSpec } = {
     min: 50,
     max: 165,
     step: 0.5,
-    description: 'Circumference at the lower ribs. Shapes the transition from chest to waist.',
+    description:
+      'Circumference of the ribcage directly under the bust. Optional, and the single most useful extra measurement on a fuller figure: the difference between it and the chest is what tells the model a bust from a broad ribcage.',
   },
   knee: {
     key: 'knee',

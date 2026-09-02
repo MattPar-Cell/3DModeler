@@ -7,12 +7,14 @@ import {
   largestComponent,
   otsuThreshold,
   segmentSubject,
+  buildBackgroundModel,
 } from './segment.ts';
 import { findCrotch, narrowestIn, silhouetteFrom, widestIn, widthAtFraction } from './silhouette.ts';
 import { silhouetteHeightPx } from './types.ts';
 import type { Mask, RasterImage } from './types.ts';
 import { extractBody, extractLamp, scaleFromKnownHeight, scaleFromReference } from './extract.ts';
 import { projectParts } from './project.ts';
+import { checkBodyOutline, checkRatios, checkViewsMatch } from './plausibility.ts';
 import type { OutlineRow, ProjectedOutline } from './project.ts';
 import { solveLamp } from '../templates/lamp/solve.ts';
 import { buildLampParts } from '../templates/lamp/build.ts';
@@ -107,14 +109,15 @@ function aPoseMask(options: {
   hipHalf: number;
   armHalf?: number;
   armGap?: number;
+  margin?: number;
 }): Mask {
   const width = options.width ?? 400;
   const height = options.height ?? 900;
   const armHalf = options.armHalf ?? 14;
   const armGap = options.armGap ?? 12;
   const data = new Uint8Array(width * height);
-  const top = 40;
-  const bottom = height - 40;
+  const top = options.margin ?? 40;
+  const bottom = height - (options.margin ?? 40);
   const span = bottom - top;
   const centre = Math.round(width / 2);
 
@@ -389,7 +392,7 @@ test('girths are withheld when the arms are against the body', () => {
 });
 
 test('an A-pose measures the torso, not the span of the arms', () => {
-  const mask = aPoseMask({ chestHalf: 52, waistHalf: 42, hipHalf: 50 });
+  const mask = aPoseMask({ chestHalf: 80, waistHalf: 64, hipHalf: 85 });
   const front = silhouetteFrom(mask);
   const cmPerPixel = scaleFromKnownHeight(front, 174);
   const scan = extractBody({ front, cmPerPixel });
@@ -399,8 +402,8 @@ test('an A-pose measures the torso, not the span of the arms', () => {
 
   // The drawn waist is 84 px across. Anything near the arm-to-arm span — which
   // is more than twice that — means the wrong run was measured.
-  const armSpan = (52 + 12 + 28) * 2 * cmPerPixel;
-  const torsoWidth = 84 * cmPerPixel;
+  const armSpan = (80 + 12 + 28) * 2 * cmPerPixel;
+  const torsoWidth = 128 * cmPerPixel;
   assert.ok(
     waist < armSpan * 1.6,
     `waist ${waist.toFixed(1)} cm looks like the arm span, not the torso`,
@@ -414,7 +417,7 @@ test('an A-pose measures the torso, not the span of the arms', () => {
 });
 
 test('a side view replaces the assumed depth with a measured one', () => {
-  const front = silhouetteFrom(aPoseMask({ chestHalf: 52, waistHalf: 42, hipHalf: 50 }));
+  const front = silhouetteFrom(aPoseMask({ chestHalf: 80, waistHalf: 64, hipHalf: 85 }));
   const cmPerPixel = scaleFromKnownHeight(front, 175);
 
   // A side view is the same pipeline with depth in place of width: a plain
@@ -459,7 +462,7 @@ test('a scan of an empty frame degrades without throwing', () => {
 test('a neck is only reported when the outline actually has one', () => {
   // The A-pose helper puts a head straight onto the shoulders with no neck
   // between them, which is what long hair or a collar does to a photograph.
-  const front = silhouetteFrom(aPoseMask({ chestHalf: 52, waistHalf: 42, hipHalf: 50 }));
+  const front = silhouetteFrom(aPoseMask({ chestHalf: 80, waistHalf: 64, hipHalf: 85 }));
   const scan = extractBody({ front, cmPerPixel: scaleFromKnownHeight(front, 174) });
   assert.equal(scan.measurements.neck, undefined, 'a head was reported as a neck');
   assert.ok(scan.notes.some((n) => n.text.includes('No distinct neck')));
@@ -468,8 +471,8 @@ test('a neck is only reported when the outline actually has one', () => {
 });
 
 test('the two views agree once both read the torso rather than the arms', () => {
-  const front = silhouetteFrom(aPoseMask({ chestHalf: 52, waistHalf: 42, hipHalf: 50 }));
-  const side = silhouetteFrom(aPoseMask({ chestHalf: 36, waistHalf: 32, hipHalf: 38 }));
+  const front = silhouetteFrom(aPoseMask({ chestHalf: 80, waistHalf: 64, hipHalf: 85 }));
+  const side = silhouetteFrom(aPoseMask({ chestHalf: 57, waistHalf: 50, hipHalf: 57 }));
   const cmPerPixel = scaleFromKnownHeight(front, 174);
   const frontOnly = extractBody({ front, cmPerPixel });
   const twoView = extractBody({ front, side, cmPerPixel });
@@ -486,4 +489,212 @@ test('the two views agree once both read the torso rather than the arms', () => 
       `${key}: front-only ${a.toFixed(1)}, two-view ${b.toFixed(1)}`,
     );
   }
+});
+
+// --- refusing to measure a broken outline ----------------------------------
+
+test('an outline that is not a person is refused rather than measured', () => {
+  // A wide, squat blob: whatever it is, it is not someone standing up.
+  const width = 400;
+  const height = 900;
+  const data = new Uint8Array(width * height);
+  for (let y = 300; y < 500; y += 1) {
+    for (let x = 60; x < 340; x += 1) data[y * width + x] = 1;
+  }
+  const silhouette = silhouetteFrom({ width, height, data });
+  const verdict = checkBodyOutline(silhouette);
+  assert.equal(verdict.usable, false);
+  assert.ok(verdict.aspect < 1.6, `aspect ${verdict.aspect}`);
+
+  const scan = extractBody({ front: silhouette, cmPerPixel: 0.5 });
+  assert.deepEqual(scan.measurements, {}, 'nothing should be reported');
+  assert.ok(scan.notes.some((n) => n.severity === 'warning'));
+});
+
+test('a mask covering nearly its whole bounding box is refused', () => {
+  const width = 300;
+  const height = 900;
+  const data = new Uint8Array(width * height).fill(0);
+  for (let y = 50; y < 850; y += 1) {
+    for (let x = 40; x < 260; x += 1) data[y * width + x] = 1;
+  }
+  const verdict = checkBodyOutline(silhouetteFrom({ width, height, data }));
+  assert.equal(verdict.usable, false);
+  assert.ok(verdict.fill > 0.78, `fill ${verdict.fill}`);
+  assert.ok(verdict.notes.some((n) => n.text.includes('background')));
+});
+
+test('measurements impossible for the stature given are withheld', () => {
+  // Exactly the beach failure: the mask covered forehead to knees, so the
+  // height the operator typed was divided over too few pixels and every ratio
+  // went somewhere no body goes.
+  const check = checkRatios({ stature: 156, shoulderWidth: 12.7, waist: 40 });
+  assert.ok(check.implausible.includes('shoulderWidth'));
+  assert.ok(check.implausible.includes('waist'));
+  assert.ok(check.notes.some((n) => n.text.includes('% of the height entered')));
+
+  // A real set passes untouched.
+  const fine = checkRatios({ stature: 174, shoulderWidth: 43, waist: 78, hip: 96, inseam: 81 });
+  assert.deepEqual(fine.implausible, []);
+});
+
+test('a sliver of a subject is refused rather than measured', () => {
+  // The beach failure's shape: a tall, narrow mask that caught the torso and
+  // one leg. Nothing about it is a whole person, and the 12.7 cm shoulder it
+  // produced was the visible symptom.
+  const width = 400;
+  const height = 900;
+  const data = new Uint8Array(width * height);
+  for (let y = 80; y < 860; y += 1) {
+    for (let x = 190; x < 230; x += 1) data[y * width + x] = 1;
+  }
+  const silhouette = silhouetteFrom({ width, height, data });
+  const verdict = checkBodyOutline(silhouette);
+  assert.equal(verdict.usable, false);
+  assert.ok(verdict.aspect > 6.5, `aspect ${verdict.aspect}`);
+  assert.ok(verdict.notes.some((n) => n.text.includes('sliver')));
+
+  const scan = extractBody({ front: silhouette, cmPerPixel: scaleFromKnownHeight(silhouette, 156) });
+  assert.deepEqual(scan.measurements, {}, 'nothing should be reported');
+});
+
+test('a side view in a different pose is rejected for depth', () => {
+  const front = silhouetteFrom(aPoseMask({ chestHalf: 80, waistHalf: 64, hipHalf: 85 }));
+  // A side view cropped to the lower body: the subject fills a different share
+  // of the frame, so one scale cannot serve both.
+  const cropped = aPoseMask({
+    chestHalf: 57,
+    waistHalf: 50,
+    hipHalf: 57,
+    height: 1600,
+    margin: 400,
+  });
+  const side = silhouetteFrom(cropped);
+  const match = checkViewsMatch(front, side);
+  assert.equal(match.usable, false);
+  assert.ok(match.notes.some((n) => n.text.includes('cropped differently')));
+
+  // ...and the extraction says so rather than silently using it.
+  const scan = extractBody({
+    front,
+    side,
+    cmPerPixel: scaleFromKnownHeight(front, 174),
+  });
+  assert.ok(scan.notes.some((n) => n.text.includes('not used for depth')));
+  assert.ok(scan.notes.some((n) => n.text.includes('assumed depth')), 'it must fall back');
+});
+
+// --- a background that is not one colour -----------------------------------
+
+/**
+ * A photograph like the one that broke the first version: sky, rock, sea and
+ * sand stacked up the frame, and a subject whose legs are close in colour to
+ * the sand they are standing on.
+ */
+function beachScene(options: { legMatchesSand: boolean }): RasterImage {
+  const width = 420;
+  const height = 900;
+  const data = new Uint8ClampedArray(width * height * 4);
+  let state = 4242;
+  const random = (): number => {
+    state = (state * 1664525 + 1013904223) >>> 0;
+    return state / 0xffffffff;
+  };
+
+  const sky: [number, number, number] = [128, 176, 214];
+  const rock: [number, number, number] = [188, 172, 148];
+  const sea: [number, number, number] = [72, 128, 142];
+  const sand: [number, number, number] = [206, 190, 165];
+  const skin: [number, number, number] = [188, 146, 116];
+  // Lower legs deliberately close to the sand: this is the pairing that lost
+  // them, and the whole point of modelling the background as several colours.
+  const leg: [number, number, number] = options.legMatchesSand ? [202, 186, 162] : skin;
+
+  const top = 60;
+  const bottom = height - 60;
+  const span = bottom - top;
+  const centre = width / 2;
+
+  for (let y = 0; y < height; y += 1) {
+    const background =
+      y < height * 0.3 ? sky : y < height * 0.52 ? rock : y < height * 0.68 ? sea : sand;
+
+    for (let x = 0; x < width; x += 1) {
+      let colour = background;
+      if (y >= top && y <= bottom) {
+        const t = (bottom - y) / span;
+        let half = 0;
+        let offset = 0;
+        if (t > 0.87) half = 26;
+        else if (t > 0.47) half = t > 0.7 ? 46 : t > 0.6 ? 38 : 48;
+        else {
+          // Two legs, apart.
+          half = 17;
+          offset = x < centre ? -26 : 26;
+        }
+        const inside = Math.abs(x - (centre + offset)) <= half;
+        // Arms held clear of the torso but attached at the shoulder: a floating
+        // arm is a separate component and gets discarded, which is a property of
+        // the drawing rather than of the scanner.
+        const fromCentre = Math.abs(x - centre);
+        const arm = t > 0.5 && t < 0.82 && fromCentre >= half - 4 && fromCentre <= half + 40;
+        if (inside || arm) colour = t < 0.4 ? leg : skin;
+      }
+      const i = (y * width + x) * 4;
+      for (let c = 0; c < 3; c += 1) {
+        data[i + c] = Math.max(0, Math.min(255, (colour[c] ?? 0) + (random() - 0.5) * 10));
+      }
+      data[i + 3] = 255;
+    }
+  }
+  return { width, height, data };
+}
+
+test('a four-colour background does not swallow the subject', () => {
+  const image = beachScene({ legMatchesSand: false });
+  const silhouette = silhouetteFrom(segmentSubject(image));
+  const drawnHeight = 900 - 120 + 1;
+  assert.ok(
+    Math.abs(silhouetteHeightPx(silhouette) - drawnHeight) < drawnHeight * 0.05,
+    `recovered ${silhouetteHeightPx(silhouette)} px of a ${drawnHeight} px subject`,
+  );
+  assert.equal(checkBodyOutline(silhouette).usable, true);
+});
+
+test('a background model of one colour is not enough for four', () => {
+  // The palette has to contain more than one entry, or sky and sand are
+  // averaged into a colour that appears nowhere and nothing separates cleanly.
+  const model = buildBackgroundModel(beachScene({ legMatchesSand: false }));
+  assert.ok(model.modes.length >= 3, `found only ${model.modes.length} background colours`);
+});
+
+test('legs that match the background are recovered by a click', () => {
+  const image = beachScene({ legMatchesSand: true });
+
+  // Without help, the legs are close enough to the sand to be lost.
+  const auto = silhouetteFrom(segmentSubject(image));
+  const drawnHeight = 900 - 120 + 1;
+  const autoHeight = silhouetteHeightPx(auto);
+
+  // One mark on a shin. The leg survives thresholding as its own component and
+  // is otherwise discarded for not being the largest; a seed keeps it.
+  const seeded = silhouetteFrom(
+    segmentSubject(image, {
+      seeds: [
+        { x: 184, y: 800, kind: 'subject' },
+        { x: 236, y: 800, kind: 'subject' },
+        { x: 210, y: 300, kind: 'subject' },
+      ],
+    }),
+  );
+  const seededHeight = silhouetteHeightPx(seeded);
+
+  assert.ok(
+    seededHeight >= autoHeight,
+    `marking made it worse: ${autoHeight} px became ${seededHeight} px`,
+  );
+  assert.ok(
+    seededHeight > drawnHeight * 0.9,
+    `still only ${seededHeight} px of a ${drawnHeight} px subject after marking`,
+  );
 });

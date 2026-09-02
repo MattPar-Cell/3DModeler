@@ -232,12 +232,70 @@ export const HEAD_ASPECT = 1.24;
 export const HEAD_FRONT_BIAS = 0.86;
 export const HEAD_BACK_BIAS = 1.14;
 
-/** Super-ellipse exponent for torso cross-sections. 2 would be a plain ellipse. */
-export const TORSO_SQUARENESS = 2.45;
-/** Super-ellipse exponent for limb cross-sections. */
-export const LIMB_SQUARENESS = 2.1;
-/** Super-ellipse exponent for the skull, which is rounder than the torso. */
+/**
+ * Super-ellipse exponent for torso cross-sections. 2 is a plain ellipse; higher
+ * is flatter-sided.
+ *
+ * A torso is flatter than an ellipse but not by much. 2.45 was too square and
+ * gave the figure slab sides; a real trunk sits closer to 2.2, which reads
+ * rounder without losing the flattening that makes a waist a waist.
+ */
+export const TORSO_SQUARENESS = 2.2;
+/** Super-ellipse exponent for limb cross-sections, which are nearly elliptical. */
+export const LIMB_SQUARENESS = 2.05;
+/** Super-ellipse exponent for the skull, which is rounder still. */
 export const HEAD_SQUARENESS = 2.0;
+
+// ---------------------------------------------------------------------------
+// Shape that responds to the measurements
+//
+// The ratios above describe an average body. Two people with the same chest
+// circumference can carry it very differently, and the difference is legible in
+// the measurements themselves: a large chest-to-underbust difference means a
+// bust, and a large hip-to-waist ratio means glutes. Reading the shape off the
+// numbers rather than fixing it in a constant is what lets one model be both
+// figures — without the app having to ask anyone their sex.
+// ---------------------------------------------------------------------------
+
+/**
+ * Chest-over-underbust ratio at which forward projection starts.
+ *
+ * Every chest is larger than the ribcage under it — the pectorals and the
+ * ribcage's own taper account for about 10% on a flat chest. Only the excess
+ * over that is a bust. Without this onset the *average* body got a 24%
+ * projection and the model's chest volume rose by four litres, putting its
+ * reconstructed weight 3.5% above the population data it is checked against.
+ */
+export const BUST_ONSET = 0.1;
+
+/**
+ * How much of the excess chest-over-underbust becomes forward projection.
+ *
+ * A bust adds depth in front of the ribcage, not girth evenly around it. The
+ * circumference is still reproduced exactly; this only decides where it sits,
+ * so a body with a bust comes out narrower and deeper than one without at the
+ * same chest measurement — which is what a tape actually finds.
+ */
+export const BUST_PROJECTION_GAIN = 1.7;
+/**
+ * Ceiling on that projection, as a multiple of the chest's mean depth.
+ *
+ * Held well below what the gain alone would reach. Past about a third, the
+ * section becomes deeper than it is wide and the chest reads as a wedge jutting
+ * off the front of the ribcage rather than as a bust.
+ */
+export const BUST_PROJECTION_MAX = 0.34;
+
+/**
+ * How much of the hip-over-waist ratio becomes gluteal projection.
+ *
+ * Measured from a waist-to-hip ratio of 0.86, around the population mean; below
+ * that the shape stays at the base bias.
+ */
+export const GLUTEAL_GAIN = 1.15;
+export const GLUTEAL_MAX = 0.5;
+/** Waist-to-hip ratio at which gluteal projection starts to grow. */
+export const GLUTEAL_ONSET = 1.16;
 
 // ---------------------------------------------------------------------------
 // Posture
@@ -325,4 +383,4 @@ export const BODY_RADIAL_SEGMENTS = 72;
 export const FIT_RADIAL_SEGMENTS = 32;
 
 /** Interpolated rings inserted between each pair of control slices. */
-export const BODY_SLICE_SMOOTHING = 4;
+export const BODY_SLICE_SMOOTHING = 5;

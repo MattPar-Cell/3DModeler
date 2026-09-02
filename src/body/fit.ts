@@ -274,9 +274,7 @@ function assembleValues(
     // The underbust is interpolated between the two measurements that bracket
     // it rather than taken from its own prior, so it can never land outside
     // them and put a ledge in the ribcage.
-    underbust:
-      entered(m, 'underbust' as BodyMeasurementKey) ??
-      waist + A.UNDERBUST_BLEND * (chest - waist),
+    underbust: entered(m, 'underbust') ?? waist + A.UNDERBUST_BLEND * (chest - waist),
     neck: girth('neck', torsoFactor),
     thigh: girth('thigh', limbFactor),
     knee: girth('knee', limbFactor),
@@ -476,6 +474,9 @@ export function fitBody(input: BodyFitInput): BodyFit {
     stature: readback.stature,
     mass: readback.mass,
     chest: readback.chest,
+    // The mesh has no separate underbust landmark to read back, so the fit
+    // reports the parameter it used. Entering one still pins it exactly.
+    underbust: values.underbust,
     waist: readback.waist,
     hip: readback.hip,
     inseam: readback.inseam,

@@ -7,7 +7,7 @@ import {
   ringForCircumference,
 } from '../core/profile.ts';
 import type { SectionShape } from '../core/profile.ts';
-import { lerp, monotoneCubic } from '../core/math.ts';
+import { clamp, lerp, monotoneCubic } from '../core/math.ts';
 import * as A from '../constants/anthropometry.ts';
 import type { BodyParamKey } from './spec.ts';
 
@@ -125,21 +125,92 @@ function blendSection(a: SectionShape, b: SectionShape, t: number): SectionShape
 const TORSO_N = A.TORSO_SQUARENESS;
 const LIMB_N = A.LIMB_SQUARENESS;
 
-/** Named cross-section shapes, so the segment definitions below stay readable. */
-const SHAPES = {
-  hip: biasedSection(A.HIP_ASPECT, A.HIP_FRONT_BIAS, A.HIP_BACK_BIAS, TORSO_N),
-  waist: biasedSection(A.WAIST_ASPECT, A.WAIST_FRONT_BIAS, A.WAIST_BACK_BIAS, TORSO_N),
-  chest: biasedSection(A.CHEST_ASPECT, A.CHEST_FRONT_BIAS, A.CHEST_BACK_BIAS, TORSO_N),
-  neck: biasedSection(A.NECK_ASPECT, 1, 1, LIMB_N),
-  limb: biasedSection(A.LIMB_ASPECT, 1, 1, LIMB_N),
-  thigh: biasedSection(A.LIMB_ASPECT, A.THIGH_FRONT_BIAS, A.THIGH_BACK_BIAS, LIMB_N),
-  calf: biasedSection(A.LIMB_ASPECT, A.CALF_FRONT_BIAS, A.CALF_BACK_BIAS, LIMB_N),
-  head: biasedSection(A.HEAD_ASPECT, A.HEAD_FRONT_BIAS, A.HEAD_BACK_BIAS, A.HEAD_SQUARENESS),
-  /** The wrist is markedly flattened front-to-back. */
-  wrist: biasedSection(0.72, 1, 1, LIMB_N),
-  /** The palm is flatter still. */
-  palm: biasedSection(0.42, 1.05, 0.95, 2.5),
-} as const;
+/**
+ * The cross-section shapes for one particular body.
+ *
+ * Not constants. Two people with the same chest circumference carry it
+ * differently, and the difference is legible in the measurements themselves —
+ * a large chest-over-underbust difference is a bust, a large hip-over-waist
+ * ratio is glutes. Reading the shape off the numbers is what lets one model be
+ * both figures without the app asking anyone their sex, and it is most of what
+ * separates a recognisable body from a smooth taper.
+ *
+ * Circumferences are unaffected: the ring is always scaled so its perimeter is
+ * the measurement. These decide only where that girth sits, so a body with a
+ * bust comes out narrower and deeper at the same chest measurement — which is
+ * what a tape actually finds.
+ */
+export interface BodySections {
+  readonly hip: SectionShape;
+  readonly waist: SectionShape;
+  readonly underbust: SectionShape;
+  readonly chest: SectionShape;
+  readonly neck: SectionShape;
+  readonly limb: SectionShape;
+  readonly thigh: SectionShape;
+  readonly calf: SectionShape;
+  readonly head: SectionShape;
+  readonly wrist: SectionShape;
+  readonly palm: SectionShape;
+  /** 0 for a flat chest, up to 1 for a pronounced bust. */
+  readonly bust: number;
+  /** 0 for flat hips, up to 1 for pronounced glutes. */
+  readonly gluteal: number;
+}
+
+export function sectionsFor(v: BodyValues): BodySections {
+  // A bust shows up as chest standing proud of the ribcage beneath it.
+  const bust = clamp(
+    ((v.chest - v.underbust) / Math.max(v.underbust, 1) - A.BUST_ONSET) *
+      A.BUST_PROJECTION_GAIN,
+    0,
+    A.BUST_PROJECTION_MAX,
+  );
+  // Glutes show up as hips standing proud of the waist above them.
+  const gluteal = clamp(
+    (v.hip / Math.max(v.waist, 1) - A.GLUTEAL_ONSET) * A.GLUTEAL_GAIN,
+    0,
+    A.GLUTEAL_MAX,
+  );
+
+  return {
+    hip: biasedSection(
+      A.HIP_ASPECT,
+      A.HIP_FRONT_BIAS * (1 - gluteal * 0.22),
+      A.HIP_BACK_BIAS * (1 + gluteal * 0.55),
+      TORSO_N,
+    ),
+    waist: biasedSection(A.WAIST_ASPECT, A.WAIST_FRONT_BIAS, A.WAIST_BACK_BIAS, TORSO_N),
+    underbust: biasedSection(
+      A.WAIST_ASPECT * 1.02,
+      A.WAIST_FRONT_BIAS * 0.96,
+      A.WAIST_BACK_BIAS,
+      TORSO_N,
+    ),
+    chest: biasedSection(
+      A.CHEST_ASPECT,
+      A.CHEST_FRONT_BIAS * (1 + bust),
+      A.CHEST_BACK_BIAS,
+      TORSO_N,
+    ),
+    neck: biasedSection(A.NECK_ASPECT, 1, 1, LIMB_N),
+    limb: biasedSection(A.LIMB_ASPECT, 1, 1, LIMB_N),
+    thigh: biasedSection(
+      A.LIMB_ASPECT,
+      A.THIGH_FRONT_BIAS,
+      A.THIGH_BACK_BIAS * (1 + gluteal * 0.18),
+      LIMB_N,
+    ),
+    calf: biasedSection(A.LIMB_ASPECT, A.CALF_FRONT_BIAS, A.CALF_BACK_BIAS, LIMB_N),
+    head: biasedSection(A.HEAD_ASPECT, A.HEAD_FRONT_BIAS, A.HEAD_BACK_BIAS, A.HEAD_SQUARENESS),
+    /** The wrist is markedly flattened front-to-back. */
+    wrist: biasedSection(0.72, 1, 1, LIMB_N),
+    /** The palm is flatter still. */
+    palm: biasedSection(0.42, 1.05, 0.95, 2.5),
+    bust,
+    gluteal,
+  };
+}
 
 /** One cross-section of a segment. */
 interface Slice {
@@ -398,6 +469,7 @@ export function buildBodySegments(
   segments: number = A.BODY_RADIAL_SEGMENTS,
 ): BodySegment[] {
   const s = buildSkeleton(v);
+  const shapes = sectionsFor(v);
   const H = s.stature;
   const out: BodySegment[] = [];
 
@@ -437,7 +509,7 @@ export function buildBodySegments(
   // --- Torso ---------------------------------------------------------------
   // The pelvis has to end exactly as wide as the two thighs leaving it, or the
   // legs step out of a narrower body and draw a "shorts" line at the crotch.
-  const thighHalfWidth = halfWidthForCircumference(v.thigh, SHAPES.thigh, segments);
+  const thighHalfWidth = halfWidthForCircumference(v.thigh, shapes.thigh, segments);
   // The pelvis's lowest section closes over both thigh tops, so it has to
   // circumscribe them *without* standing proud of them: as wide as the pair,
   // but only as deep as a single thigh. Its depth is therefore derived from the
@@ -446,8 +518,8 @@ export function buildBodySegments(
   // while a shallower one lets the thighs poke out through it.
   const crotchHalfWidth = s.hipJointX + thighHalfWidth;
   const crotchShape: SectionShape = {
-    front: (thighHalfWidth * SHAPES.thigh.front) / crotchHalfWidth,
-    back: (thighHalfWidth * SHAPES.thigh.back) / crotchHalfWidth,
+    front: (thighHalfWidth * shapes.thigh.front) / crotchHalfWidth,
+    back: (thighHalfWidth * shapes.thigh.back) / crotchHalfWidth,
     // Squarer than a hip, so the outline hugs two circles side by side.
     squareness: 2.9,
   };
@@ -477,15 +549,15 @@ export function buildBodySegments(
           v.hip,
           0.86,
         ),
-        shape: blendSection(crotchShape, SHAPES.hip, 0.82),
+        shape: blendSection(crotchShape, shapes.hip, 0.82),
       },
-      { y: s.hipY, cx: 0, cz: s.spineAt(s.hipY), circumference: v.hip, shape: SHAPES.hip },
+      { y: s.hipY, cx: 0, cz: s.spineAt(s.hipY), circumference: v.hip, shape: shapes.hip },
       {
         y: lowerWaistY,
         cx: 0,
         cz: s.spineAt(lowerWaistY),
         circumference: lerp(v.hip, v.waist, 0.62),
-        shape: blendSection(SHAPES.hip, SHAPES.waist, 0.5),
+        shape: blendSection(shapes.hip, shapes.waist, 0.5),
       },
     ],
     { bottom: true, top: false },
@@ -502,21 +574,21 @@ export function buildBodySegments(
         cx: 0,
         cz: s.spineAt(lowerWaistY),
         circumference: lerp(v.hip, v.waist, 0.62),
-        shape: blendSection(SHAPES.hip, SHAPES.waist, 0.5),
+        shape: blendSection(shapes.hip, shapes.waist, 0.5),
       },
       {
         y: s.waistY,
         cx: 0,
         cz: s.spineAt(s.waistY),
         circumference: v.waist,
-        shape: SHAPES.waist,
+        shape: shapes.waist,
       },
       {
         y: s.underbustY,
         cx: 0,
         cz: s.spineAt(s.underbustY),
         circumference: v.underbust,
-        shape: blendSection(SHAPES.waist, SHAPES.chest, 0.5),
+        shape: shapes.underbust,
       },
     ],
     { bottom: false, top: false },
@@ -525,7 +597,7 @@ export function buildBodySegments(
 
   // The top of the chest is sized by shoulder *breadth* rather than a
   // circumference, because that is the measurement people actually take there.
-  const shoulderShape = blendSection(SHAPES.chest, SHAPES.neck, 0.25);
+  const shoulderShape = blendSection(shapes.chest, shapes.neck, 0.25);
   const shoulderRingCircumference = circumferenceForHalfWidth(
     (v.shoulderWidth * 0.86) / 2,
     shoulderShape,
@@ -544,21 +616,41 @@ export function buildBodySegments(
         cx: 0,
         cz: s.spineAt(s.underbustY),
         circumference: v.underbust,
-        shape: blendSection(SHAPES.waist, SHAPES.chest, 0.5),
+        shape: shapes.underbust,
+      },
+      {
+        // The underside of the bust. Without a slice here the chest's forward
+        // projection is reached by a straight interpolation from the ribcage,
+        // which is a cone rather than a breast — but weight it too far toward
+        // the chest and the swell arrives all at once, as a shelf.
+        y: lerp(s.underbustY, s.chestY, 0.48),
+        cx: 0,
+        cz: s.spineAt(lerp(s.underbustY, s.chestY, 0.48)),
+        circumference: lerp(v.underbust, v.chest, 0.44),
+        shape: blendSection(shapes.underbust, shapes.chest, 0.42),
       },
       {
         y: s.chestY,
         cx: 0,
         cz: s.spineAt(s.chestY),
         circumference: v.chest,
-        shape: SHAPES.chest,
+        shape: shapes.chest,
+      },
+      {
+        // Just above the bust apex, still carrying most of its projection: drop
+        // straight to the shoulder section here and the chest ends in a ledge.
+        y: lerp(s.chestY, upperChestY, 0.4),
+        cx: 0,
+        cz: s.spineAt(lerp(s.chestY, upperChestY, 0.4)),
+        circumference: lerp(v.chest, Math.max(v.chest * 0.95, shoulderRingCircumference), 0.4),
+        shape: blendSection(shapes.chest, shoulderShape, 0.3),
       },
       {
         y: upperChestY,
         cx: 0,
         cz: s.spineAt(upperChestY),
         circumference: Math.max(v.chest * 0.95, shoulderRingCircumference),
-        shape: blendSection(SHAPES.chest, shoulderShape, 0.5),
+        shape: blendSection(shapes.chest, shoulderShape, 0.72),
       },
       {
         y: s.shoulderY,
@@ -574,7 +666,7 @@ export function buildBodySegments(
         cx: 0,
         cz: s.spineAt(yokeY),
         circumference: v.neck * 1.42,
-        shape: SHAPES.neck,
+        shape: shapes.neck,
       },
     ],
     { bottom: false, top: false },
@@ -587,20 +679,20 @@ export function buildBodySegments(
     'Neck',
     'neck',
     [
-      { y: yokeY, cx: 0, cz: s.spineAt(yokeY), circumference: v.neck * 1.42, shape: SHAPES.neck },
+      { y: yokeY, cx: 0, cz: s.spineAt(yokeY), circumference: v.neck * 1.42, shape: shapes.neck },
       {
         y: neckLandmarkY,
         cx: 0,
         cz: s.spineAt(neckLandmarkY),
         circumference: v.neck,
-        shape: SHAPES.neck,
+        shape: shapes.neck,
       },
       {
         y: s.chinY,
         cx: 0,
         cz: s.spineAt(s.chinY),
         circumference: v.neck * 0.94,
-        shape: SHAPES.neck,
+        shape: shapes.neck,
       },
     ],
     { bottom: false, top: false },
@@ -617,14 +709,14 @@ export function buildBodySegments(
   const jawShape = biasedSection(A.HEAD_ASPECT * 0.86, 0.94, 1.06, A.HEAD_SQUARENESS);
   const headProfile: readonly (readonly [number, number, SectionShape, number])[] = [
     // [fraction of head height, circumference multiple, shape, forward offset]
-    [0.0, 0.0, SHAPES.neck, 0.0],
+    [0.0, 0.0, shapes.neck, 0.0],
     [0.1, 0.72, jawShape, 0.1],
     [0.26, 0.86, jawShape, 0.11],
-    [0.45, 0.97, SHAPES.head, 0.06],
-    [0.62, 1.0, SHAPES.head, 0.0],
-    [0.78, 0.94, SHAPES.head, -0.03],
-    [0.9, 0.74, SHAPES.head, -0.04],
-    [1.0, 0.24, SHAPES.head, -0.03],
+    [0.45, 0.97, shapes.head, 0.06],
+    [0.62, 1.0, shapes.head, 0.0],
+    [0.78, 0.94, shapes.head, -0.03],
+    [0.9, 0.74, shapes.head, -0.04],
+    [1.0, 0.24, shapes.head, -0.03],
   ];
   const headSlices: Slice[] = headProfile.map(([t, scale, shape, forward], i) => ({
     y: s.chinY + headSpan * t,
@@ -657,21 +749,21 @@ export function buildBodySegments(
           cx: sign * s.hipJointX,
           cz: s.spineAt(s.crotchY),
           circumference: v.thigh,
-          shape: SHAPES.thigh,
+          shape: shapes.thigh,
         },
         {
           y: midThighY,
           cx: sign * s.hipJointX * 0.9,
           cz: s.spineAt(s.crotchY) * 0.5,
           circumference: lerp(v.thigh, v.knee, 0.62),
-          shape: SHAPES.thigh,
+          shape: shapes.thigh,
         },
         {
           y: s.kneeY,
           cx: sign * s.hipJointX * 0.84,
           cz: 0.002 * H,
           circumference: v.knee,
-          shape: blendSection(SHAPES.thigh, SHAPES.limb, 0.7),
+          shape: blendSection(shapes.thigh, shapes.limb, 0.7),
         },
       ],
       // The pelvis's bottom cap spans both thigh tops, so the thigh needs none.
@@ -688,28 +780,28 @@ export function buildBodySegments(
           cx: sign * s.hipJointX * 0.84,
           cz: 0.002 * H,
           circumference: v.knee,
-          shape: blendSection(SHAPES.thigh, SHAPES.limb, 0.7),
+          shape: blendSection(shapes.thigh, shapes.limb, 0.7),
         },
         {
           y: s.calfY,
           cx: sign * s.hipJointX * 0.78,
           cz: -0.004 * H,
           circumference: v.calf,
-          shape: SHAPES.calf,
+          shape: shapes.calf,
         },
         {
           y: lerp(s.calfY, s.ankleY, 0.65),
           cx: sign * s.hipJointX * 0.72,
           cz: -0.002 * H,
           circumference: lerp(v.calf, v.ankle, 0.78),
-          shape: blendSection(SHAPES.calf, SHAPES.limb, 0.6),
+          shape: blendSection(shapes.calf, shapes.limb, 0.6),
         },
         {
           y: s.ankleY * 0.55,
           cx: sign * s.hipJointX * 0.7,
           cz: 0,
           circumference: v.ankle,
-          shape: SHAPES.limb,
+          shape: shapes.limb,
         },
       ],
       // The bottom sits inside the foot, which covers it.
@@ -733,21 +825,21 @@ export function buildBodySegments(
           cx: sign * s.shoulderJoint.x * 0.96,
           cz: s.shoulderJoint.z,
           circumference: v.bicep * 0.55,
-          shape: SHAPES.limb,
+          shape: shapes.limb,
         },
         {
           y: lerp(s.shoulderJoint.y, s.shoulderY, 0.62),
           cx: sign * s.shoulderJoint.x,
           cz: s.shoulderJoint.z,
           circumference: v.bicep * 1.24,
-          shape: SHAPES.limb,
+          shape: shapes.limb,
         },
         {
           y: lerp(s.shoulderJoint.y, s.shoulderY, 0.2),
           cx: sign * s.shoulderJoint.x,
           cz: s.shoulderJoint.z,
           circumference: v.bicep * 1.36,
-          shape: SHAPES.limb,
+          shape: shapes.limb,
         },
         {
           y: bicepY,
@@ -763,7 +855,7 @@ export function buildBodySegments(
           cx: sign * s.elbow.x,
           cz: s.elbow.z,
           circumference: v.bicep * 0.85,
-          shape: SHAPES.limb,
+          shape: shapes.limb,
         },
       ],
       { bottom: false, top: true },
@@ -780,28 +872,28 @@ export function buildBodySegments(
           cx: sign * s.elbow.x,
           cz: s.elbow.z,
           circumference: v.bicep * 0.85,
-          shape: SHAPES.limb,
+          shape: shapes.limb,
         },
         {
           y: lerp(s.elbow.y, s.wrist.y, forearmBellyT),
           cx: sign * lerp(s.elbow.x, s.wrist.x, forearmBellyT),
           cz: lerp(s.elbow.z, s.wrist.z, forearmBellyT),
           circumference: v.forearm,
-          shape: SHAPES.limb,
+          shape: shapes.limb,
         },
         {
           y: lerp(s.elbow.y, s.wrist.y, 0.72),
           cx: sign * lerp(s.elbow.x, s.wrist.x, 0.72),
           cz: lerp(s.elbow.z, s.wrist.z, 0.72),
           circumference: lerp(v.forearm, v.wrist, 0.72),
-          shape: blendSection(SHAPES.limb, SHAPES.wrist, 0.6),
+          shape: blendSection(shapes.limb, shapes.wrist, 0.6),
         },
         {
           y: s.wrist.y,
           cx: sign * s.wrist.x,
           cz: s.wrist.z,
           circumference: v.wrist,
-          shape: SHAPES.wrist,
+          shape: shapes.wrist,
         },
       ],
       { bottom: false, top: false },
@@ -817,7 +909,7 @@ export function buildBodySegments(
           cx: sign * s.wrist.x,
           cz: s.wrist.z,
           circumference: v.wrist,
-          shape: SHAPES.wrist,
+          shape: shapes.wrist,
         },
         {
           // Knuckle line: the palm is at its widest and flattest here.
@@ -825,28 +917,28 @@ export function buildBodySegments(
           cx: sign * lerp(s.wrist.x, s.fingertip.x, 0.42),
           cz: lerp(s.wrist.z, s.fingertip.z, 0.42),
           circumference: v.wrist * 1.46,
-          shape: SHAPES.palm,
+          shape: shapes.palm,
         },
         {
           y: lerp(s.wrist.y, s.fingertip.y, 0.72),
           cx: sign * lerp(s.wrist.x, s.fingertip.x, 0.72),
           cz: lerp(s.wrist.z, s.fingertip.z, 0.72),
           circumference: v.wrist * 1.26,
-          shape: SHAPES.palm,
+          shape: shapes.palm,
         },
         {
           y: lerp(s.wrist.y, s.fingertip.y, 0.93),
           cx: sign * lerp(s.wrist.x, s.fingertip.x, 0.93),
           cz: lerp(s.wrist.z, s.fingertip.z, 0.93),
           circumference: v.wrist * 0.86,
-          shape: SHAPES.palm,
+          shape: shapes.palm,
         },
         {
           y: s.fingertip.y,
           cx: sign * s.fingertip.x,
           cz: s.fingertip.z,
           circumference: v.wrist * 0.3,
-          shape: SHAPES.palm,
+          shape: shapes.palm,
         },
       ],
       { bottom: true, top: false },

@@ -291,6 +291,26 @@ forearm and hand rated `measured`, the limb girths `derived` from the wrist, and
 the torso honestly `estimated`. The "One body part only" button loads exactly
 this case.
 
+### Shape that responds to the measurements
+
+The anthropometric ratios describe an average body. Two people with the same
+chest circumference carry it very differently, and the difference is legible in
+the measurements themselves — so the cross-section shapes are computed per body
+rather than fixed:
+
+* **Bust.** Chest standing proud of the ribcage under it becomes forward
+  projection, past the ~10% that a flat chest shows anyway. Enter an underbust
+  measurement and that signal is real rather than inferred; it is the single
+  most useful extra measurement on a fuller figure.
+* **Glutes.** Hips standing proud of the waist become rearward projection at the
+  hip and a little extra depth at the back of the thigh.
+
+Circumferences are untouched by any of this — the ring is always scaled so its
+perimeter is the measurement. These decide only *where* the girth sits, so a
+body with a bust comes out narrower and deeper at the same chest measurement,
+which is what a tape actually finds. It is also what lets one model be a range
+of figures without the app having to ask anyone their sex.
+
 ### The generated body
 
 Beyond the fitting, what makes the figure read as a person rather than a stack
@@ -361,11 +381,10 @@ image to, and the image is discarded when the tab closes.
 
 ### The pipeline
 
-1. **Segment.** Estimate the background from the *median* of the frame's border
-   band, score every pixel by its distance from it (chroma weighted above
-   brightness, so a shadow on the backdrop is not subject), threshold with
-   Otsu's method, open and close to remove speckle and pinholes, keep the
-   largest connected region, and fill enclosed holes.
+1. **Segment.** Model the background as *several colours* found around the
+   frame's border, score every pixel by its distance to the nearest of them in
+   CIELAB, threshold with Otsu's method, open and close to remove speckle and
+   pinholes, keep the largest connected region, and fill enclosed holes.
 2. **Outline.** Reduce the mask to a left and right edge per row, plus the run
    straddling the subject's midline.
 3. **Measure.** Every reading is a question about that outline: how tall is it,
@@ -375,6 +394,25 @@ image to, and the image is discarded when the tab closes.
 Not a neural network, deliberately. A classical pipeline's failure modes are
 predictable and explainable, which matters more for a tool whose output becomes
 a measurement than a cleverer method whose errors are not.
+
+Three details in there were learned the hard way, from a beach photograph:
+
+* **The background is not one colour.** A beach has sky, rock, sea and sand in
+  its border, and their average is a colour that appears nowhere in the image.
+  Tanned legs then failed to separate from pale sand and were cut off at the
+  knee. The border is modelled as a palette instead, and distances are taken in
+  CIELAB rather than RGB, because that is the space where skin and sand are
+  actually far apart.
+* **The palette must be found globally, not per band.** Modelling each
+  horizontal band separately sounds better — sky belongs at the top, sand at the
+  bottom — and is worse: a band the subject happens to cross has a border made
+  largely of subject, and adopts the subject's own colour as background. Found
+  globally, the subject is a small minority of the perimeter and a minimum-share
+  rule excludes it.
+* **Where colour genuinely overlaps, only the operator can settle it.** Clicking
+  a missed shin keeps it — the limb survives thresholding as its own component
+  and is otherwise discarded for not being the largest. Clicking something that
+  is not the subject drops it.
 
 ### Scale
 
@@ -397,6 +435,30 @@ length a single photograph gives outright. Torso widths are then sampled at
 landmark heights *reconciled with that inseam*, exactly as `buildSkeleton` does,
 and converted to circumferences through the same super-ellipse sections the
 model is built from.
+
+### What it checks before believing itself
+
+The scanner's worst failure is not being wrong — it is being wrong confidently.
+A mask that ran from a subject's forehead to her knees divided the height typed
+beside it over the wrong pixels and reported a **12.7 cm shoulder width** in the
+same styling as a good measurement. Nothing downstream noticed, because nothing
+downstream was looking.
+
+Three checks now look:
+
+* **Is this outline shaped like a person?** Aspect ratio and how much of its own
+  bounding box it fills, bounded differently for a front view and a profile —
+  a body seen side-on is legitimately far narrower. Too squat, too sliver-like,
+  or too close to a solid rectangle, and nothing is measured at all.
+* **Are these numbers consistent with each other?** Every measurement is checked
+  against its plausible ratio to the stature it was taken alongside. That
+  12.7 cm shoulder is 8% of a 156 cm subject where a real one is 19–34%, and it
+  is caught without knowing what went wrong upstream.
+* **Do the two views show the same person standing the same way?** A side
+  photograph taken on a different day, cropped differently, with an arm raised,
+  shares nothing with the front view but the subject's identity — and identity
+  is not what the depth calculation needs. Mismatched crop or a crotch at a
+  different height, and the side view is refused for depth.
 
 ### What it refuses to read
 
@@ -445,7 +507,7 @@ come back.
 * Anthropometric and template constants live in dedicated modules with the
   source of each figure in a comment, including where a figure is uncertain or
   where two published definitions disagree.
-* 120 unit tests covering the geometry core, the lamp solver, the body fit, the
+* 128 unit tests covering the geometry core, the lamp solver, the body fit, the
   comparison logic and the whole scanning pipeline — reconstruction errors,
   constraint repair, provenance propagation, winding, interpolation overshoot,
   degenerate inputs, and agreement with outside population data. The scanner is
@@ -475,6 +537,10 @@ because each one caught a real bug:
 | A lamp survives model → photograph → scan | A projection that sampled vertices and left horizontal slots through the outline wherever a part's rings were sparser than the sampling rows |
 | Girths are withheld when the arms are down | A silhouette measuring arm-span as waist, and reporting it with only a caveat |
 | A neck is only reported when the outline has one | A head reported as a 72 cm neck |
+| A four-colour background does not swallow the subject | A single-colour background model that lost tanned legs against sand |
+| An outline that is not a person is refused | A forehead-to-knees mask measured as though it were a body |
+| Measurements impossible for the stature given are withheld | A 12.7 cm shoulder on a 156 cm subject, reported as fact |
+| A side view in a different pose is rejected for depth | Two unrelated photographs averaged into one set of depths |
 
 ## Non-goals
 
