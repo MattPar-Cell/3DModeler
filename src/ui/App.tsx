@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { LampWorkspace } from './LampWorkspace.tsx';
 import { BodyWorkspace } from './BodyWorkspace.tsx';
+import { CompareWorkspace } from './CompareWorkspace.tsx';
+import { useComparisonStore } from '../state/comparisonStore.ts';
 
-type Mode = 'object' | 'body';
+type Mode = 'object' | 'body' | 'compare';
 
 /**
  * App shell. Two reconstruction recipes share one philosophy: store the
@@ -10,6 +12,7 @@ type Mode = 'object' | 'body';
  */
 export function App() {
   const [mode, setMode] = useState<Mode>('object');
+  const savedCount = useComparisonStore((s) => s.snapshots.length);
 
   return (
     <div className="app">
@@ -35,9 +38,20 @@ export function App() {
           >
             Human body
           </button>
+          <button
+            type="button"
+            role="tab"
+            className="tab"
+            aria-selected={mode === 'compare'}
+            onClick={() => setMode('compare')}
+          >
+            Compare{savedCount > 0 ? ` (${savedCount})` : ''}
+          </button>
         </div>
       </header>
-      {mode === 'object' ? <LampWorkspace /> : <BodyWorkspace />}
+      {mode === 'object' && <LampWorkspace />}
+      {mode === 'body' && <BodyWorkspace />}
+      {mode === 'compare' && <CompareWorkspace />}
     </div>
   );
 }

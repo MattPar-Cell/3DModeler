@@ -5,8 +5,8 @@ import type { ProfilePoint } from '../../core/profile.ts';
 import type { Provenance } from '../../core/params.ts';
 import type { GeneratedModel, GeneratedPart } from '../types.ts';
 import {
-  FINIAL_DIAMETER_OVER_SHADE_TOP,
   FINIAL_HEIGHT_OVER_DIAMETER,
+  HARP_TOP_INSET,
   HARP_SPREAD,
   HARP_WIRE_OVER_STEM_DIAMETER,
   PROFILE_ROWS,
@@ -225,7 +225,7 @@ export function buildLampParts(params: LampParams): GeneratedPart[] {
   // socket, bowing out past the bulb and drawing back in under the finial.
   const harpRadius = (stemR * 2 * HARP_WIRE_OVER_STEM_DIAMETER) / 2;
   const harpSpread = shadeBottomR * HARP_SPREAD;
-  const harpTopY = y4 - shadeHeight * 0.08;
+  const harpTopY = y4 - shadeHeight * HARP_TOP_INSET;
   for (const sign of [1, -1] as const) {
     const pathPoints = 24;
     const path = Array.from({ length: pathPoints }, (_, i) => {
@@ -269,9 +269,11 @@ export function buildLampParts(params: LampParams): GeneratedPart[] {
     ),
   );
 
-  // Finial: the knob that screws onto the harp and holds the shade down.
-  const finialR = (shadeTopR * 2 * FINIAL_DIAMETER_OVER_SHADE_TOP) / 2;
-  const finialHeight = finialR * 2 * FINIAL_HEIGHT_OVER_DIAMETER;
+  // Finial: the knob that screws onto the harp and holds the shade down. Its
+  // height comes from the solved parameter set, because the solver has already
+  // set aside room for the part of it that stands above the shade.
+  const finialHeight = v('finialHeight');
+  const finialR = finialHeight / (2 * FINIAL_HEIGHT_OVER_DIAMETER);
   parts.push(
     part(
       'finial',

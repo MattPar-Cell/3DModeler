@@ -13,6 +13,7 @@ import { Constraints, DerivedTable, MeasurementField } from './ParamViews.tsx';
 import { Viewer } from './Viewer.tsx';
 import { ExportBar } from './ExportBar.tsx';
 import { ConfidenceLegend, StatStrip } from './Overlays.tsx';
+import { SaveForComparison } from './SaveForComparison.tsx';
 
 /** The lamp template workspace: sidebar of measurements plus the live viewer. */
 export function LampWorkspace() {
@@ -121,6 +122,11 @@ export function LampWorkspace() {
         </div>
 
         <div className="section">
+          <h2>Compare</h2>
+          <SaveForComparison kind="lamp" measurements={entered} proportion={proportion} />
+        </div>
+
+        <div className="section">
           <h2>Export</h2>
           <ExportBar rootRef={rootRef} stem="lamp" />
           <p className="note" style={{ marginTop: 8 }}>
@@ -132,7 +138,7 @@ export function LampWorkspace() {
 
       <main className="viewer">
         <Viewer
-          parts={model.parts}
+          instances={[{ id: 'lamp', parts: model.parts, offsetX: 0, opacity: 1 }]}
           height={model.height}
           confidenceShading={confidenceShading}
           rootRef={rootRef}

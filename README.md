@@ -66,6 +66,8 @@ src/
       defaults.ts  proportion ratios, each with the convention it comes from
       solve.ts     measurements → complete parameter set + constraint reports
       build.ts     parameter set → parts
+  compare/
+    snapshots.ts   saved models, layout and measurement diffing
   body/
     spec.ts        every body parameter, documented and range-checked
     segments.ts    skeleton layout and per-segment cross-section stacks
@@ -85,11 +87,25 @@ DOM and no WebGL context.
 
 Everything is a **loft**: an ordered stack of closed cross-sections, triangulated
 between consecutive rings and capped at the ends (`core/loft.ts`). A lamp part is
-a stack of circles whose radius follows a profile curve. A body segment (see
-below) is a stack of super-ellipses carried along a bone. There is no second code
-path, and no `CylinderGeometry`/`LatheGeometry` fallback.
+a stack of circles whose radius follows a profile curve. A body segment is a
+stack of super-ellipses carried along a bone. A lamp harp is a tube swept along
+a path. There is no second code path, and no `CylinderGeometry`/`LatheGeometry`
+fallback.
 
-Two details in there are load-bearing:
+The cross-section is an **asymmetric super-ellipse**:
+
+```
+|x / a|ⁿ + |z / b(z)|ⁿ = 1,    b(z) = front for z > 0, back for z < 0
+```
+
+`n = 2` with `front = back` is a plain ellipse. Both extra degrees of freedom
+earn their place on a body: `n ≈ 2.45` because a waist is measurably flatter
+than an ellipse, and independent front/back depth because a hip is far deeper
+behind the spine than in front of it, a belly is the reverse, and a calf carries
+almost all its bulk at the back. None of it can change a measurement — the ring
+is always scaled so its perimeter *is* the circumference.
+
+Several details in there are load-bearing:
 
 * **Normals are computed analytically** from the ring and stack tangents rather
   than by `computeVertexNormals()`. The seam column is duplicated so UVs can run
@@ -98,7 +114,21 @@ Two details in there are load-bearing:
 * **Winding is verified by a test**, not by eye: `meshVolume()` applies the
   divergence theorem, and a closed cylinder whose faces are wound outward must
   come out to the analytic volume of an inscribed N-gon prism. That test caught
-  an inverted cap fan during development.
+  an inverted cap fan during development, and later a whole set of limbs written
+  joint-downward and lofted inside out.
+* **Profiles run through monotone cubic interpolation** (`monotoneCubicAt`).
+  Smoothstep forces the slope to zero at *every* control point, so a profile
+  through eight control sections came out as eight plateaus joined by ramps —
+  clearly visible as bands across the head. Plain cubic splines fix the banding
+  but overshoot, which on a body means a bulge just above a measured chest that
+  is wider than the chest. Fritsch–Carlson gives the smoothness with neither.
+* **Swept tubes use parallel-transport frames**, not Frenet frames, whose normal
+  flips wherever a curve straightens out — a twist a thin wire shows off
+  perfectly.
+* **Ring generation is table-driven.** The powers in a super-ellipse depend only
+  on the exponent and the segment count, so they are computed once per pair and
+  every ring afterwards is two multiplications per point. That is what makes 72
+  segments and a 25-evaluation girth search affordable at keystroke rate.
 
 ### Units
 
@@ -118,6 +148,14 @@ stem belly, socket height, socket diameter, shade height and shade top diameter
 from the ratios in `templates/lamp/defaults.ts` — each documented with the
 lighting-trade convention it comes from.
 
+The generated lamp is a turned form rather than a stack of cones: a plinth,
+fillet and cove on the base, a collared and bellied stem, a shade that bows
+outward from the straight cone and is wrapped over a wire rim at each end, a
+harp springing from the socket, and a finial capping it. Materials distinguish
+glazed ceramic, brushed brass, and fabric lit from within — that last one, an
+emissive term standing in for the bulb behind the cloth, is most of what makes a
+truncated cone read as a lampshade.
+
 ### Constraints
 
 The solver reports on each of these, and repairs violations by moving *inferred*
@@ -127,8 +165,16 @@ values in preference to measured ones:
 |---|---|
 | Shade bottom diameter ≥ base diameter | Widen the inferred shade, or narrow the inferred base |
 | Stem diameter ≤ base top diameter | Widen the base neck around a measured stem; narrow an inferred stem |
-| Base + stem + socket + shade heights = total height | The stem absorbs the remainder, so total height is exact |
+| Base + stem + socket + shade + finial protrusion = total height | The stem absorbs the remainder, so total height is exact |
 | Stem keeps ≥ 20% of total height | Scale the inferred base and shade down together |
+
+The finial is in that height sum for a reason. It screws onto the harp just
+below the shade's top rim, so most of it stands *above* the rim — leave it out
+and the generated lamp comes out taller than the number the user typed. Making
+room for it is also not a simple rescale: the finial is fixed in size and only
+partly hidden inside the shade, so shrinking the shade *increases* how much of
+the finial sticks out. The solver works the shrink factor out in closed form
+rather than iterating.
 
 When a constraint is violated by two values the user *actually measured*, the
 solver refuses to silently rewrite either. It keeps both numbers and reports the
@@ -238,6 +284,24 @@ forearm and hand rated `measured`, the limb girths `derived` from the wrist, and
 the torso honestly `estimated`. The "One body part only" button loads exactly
 this case.
 
+### The generated body
+
+Beyond the fitting, what makes the figure read as a person rather than a stack
+of tubes: a spine with real sagittal curvature that every torso section is
+centred on, cross-sections that are deeper behind than in front at the hips and
+the reverse at the belly, a skull with a jaw and an occiput, a foot lofted heel
+to toe rather than stacked up its height, a few degrees of elbow flexion, and
+biceps/triceps depth on the upper arm.
+
+Segments *meet* at shared landmark planes rather than interpenetrating.
+Overlapping them would look marginally smoother, but the overlap volume gets
+counted twice and the weight fit is a volume calculation — two thighs pushed up
+inside the pelvis added around six litres of phantom body, which the girth
+search then tried to remove by shrinking the user's real measurements. For the
+same reason, interior end caps are not rendered: two segments meeting at a
+landmark would otherwise put coincident discs in the same plane, and the
+z-fighting draws a bright ring around the body at every join.
+
 ### What this model is not
 
 The app does not ask for sex, so the circumference priors are the midpoint of
@@ -245,6 +309,38 @@ the ANSUR II male and female means. Male and female means differ by 3–7% of
 stature at the chest, waist and hip, which is a large error for one person — so
 an unmeasured torso on this model is a genuinely rough guess, and the UI says
 so. Entering the measurement removes the prior from the fit entirely.
+
+## Feature 3 — comparison
+
+Save any model for comparison, then put several of them in one scene.
+
+A saved model is **the measurement set and nothing else** — not the solved
+parameters, and certainly not a mesh. Comparing two lamps means solving and
+regenerating both, exactly as the live editor does. That falls straight out of
+the premise: if geometry is a pure function of parameters, then storing a model
+*is* storing its parameters. Saved comparisons live in `localStorage` (a few
+dozen numbers each) and stay valid across changes to the templates themselves,
+because the templates are not what was saved.
+
+Two arrangements:
+
+* **Side by side** — models stand in a row on a shared floor, gaps scaled to the
+  models so a row of lamps is not separated by body-sized gaps. Relative height
+  and bulk read directly.
+* **Overlay** — models share one origin and are drawn translucent, so a
+  difference in profile shows up as the places their silhouettes come apart.
+
+And two tables:
+
+* **Overall size** — height, width and depth read off the *generated meshes*, so
+  it works for any mix of models. This is what lets you stand a lamp next to a
+  person to check a scale.
+* **Parameters** — every parameter that differs, largest difference first, with
+  absolute and percentage deltas against the first model, and each value still
+  carrying its measured/derived/estimated colour. Only offered when the
+  selection shares a kind: a lamp's stem diameter and a person's neck have
+  nothing to say to each other, and inventing a row that pairs them would be
+  worse than showing none.
 
 ## Code quality
 
@@ -257,9 +353,10 @@ so. Entering the measurement removes the prior from the fit entirely.
 * Anthropometric and template constants live in dedicated modules with the
   source of each figure in a comment, including where a figure is uncertain or
   where two published definitions disagree.
-* 63 unit tests covering the geometry core, the lamp solver and the body fit —
-  reconstruction errors, constraint repair, provenance propagation, degenerate
-  inputs, and agreement with outside population data.
+* 98 unit tests covering the geometry core, the lamp solver, the body fit and
+  the comparison logic — reconstruction errors, constraint repair, provenance
+  propagation, winding, interpolation overshoot, degenerate inputs, and
+  agreement with outside population data.
 
 ## Tests
 
@@ -277,8 +374,14 @@ because each one caught a real bug:
 | Weight round-trip | Thighs pushed up inside the pelvis, adding ~6 litres of phantom body that the girth search then removed from the real measurements |
 | Provenance through chained derivations | A value two ratios away from a measurement being reported as a bare guess |
 | Measurements read back off the mesh, not the parameters | A landmark height the builder and the readback disagreed about |
+| Monotone cubic never overshoots its data | A local maximum whose tangent was not zeroed, letting a profile sail past a measured value |
+| The generated mesh is exactly as tall as the entered height | A finial that pushed the lamp past the height the user typed |
+| The spine curve does not corrupt torso circumferences | A limb-style tilt correction applied to a torso, putting 0.6 cm into every chest reading |
+| Side-by-side layout never overlaps | — |
 
 ## Non-goals
 
 No photogrammetry, no image-to-3D, no file imports, no backend. Shading is clean
-matte studio lighting; photorealism is not attempted.
+matte studio lighting; photorealism is not attempted, and the figure is a
+measurement aid rather than a portrait — it has no face, and the skin tone is
+deliberately a neutral clay.

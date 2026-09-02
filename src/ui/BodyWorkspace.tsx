@@ -11,6 +11,7 @@ import { RegionConfidenceList } from './RegionConfidence.tsx';
 import { Viewer } from './Viewer.tsx';
 import { ExportBar } from './ExportBar.tsx';
 import { ConfidenceLegend, StatStrip } from './Overlays.tsx';
+import { SaveForComparison } from './SaveForComparison.tsx';
 
 /** Parameters worth showing in the reconstructed-values table. */
 const REPORTED_PARAMS: readonly BodyParamKey[] = [
@@ -129,6 +130,11 @@ export function BodyWorkspace() {
         </div>
 
         <div className="section">
+          <h2>Compare</h2>
+          <SaveForComparison kind="body" measurements={entered} />
+        </div>
+
+        <div className="section">
           <h2>Export</h2>
           <ExportBar rootRef={rootRef} stem="body" />
           <p className="note" style={{ marginTop: 8 }}>
@@ -140,7 +146,7 @@ export function BodyWorkspace() {
 
       <main className="viewer">
         <Viewer
-          parts={model.parts}
+          instances={[{ id: 'body', parts: model.parts, offsetX: 0, opacity: 1 }]}
           height={model.height}
           confidenceShading={confidenceShading}
           rootRef={rootRef}

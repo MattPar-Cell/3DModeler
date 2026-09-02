@@ -26,7 +26,8 @@ export type LampParamKey =
   | 'socketHeight'
   | 'socketDiameter'
   | 'shadeHeight'
-  | 'shadeTopDiameter';
+  | 'shadeTopDiameter'
+  | 'finialHeight';
 
 export type LampMeasurements = Measurements<LampMeasurementKey>;
 export type LampParams = ParamSet<LampParamKey>;
@@ -54,7 +55,7 @@ export const LAMP_PARAM_SPECS: { readonly [K in LampParamKey]: ParamSpec } = {
     max: 200,
     step: 0.5,
     description:
-      'Floor/table surface to the top edge of the shade. 15 cm covers small accent lamps, 200 cm the tallest floor lamps.',
+      'Floor/table surface to the very top of the lamp, finial included — what a tape measure gives. 15 cm covers small accent lamps, 200 cm the tallest floor lamps.',
   },
   baseDiameter: {
     key: 'baseDiameter',
@@ -154,6 +155,16 @@ export const LAMP_PARAM_SPECS: { readonly [K in LampParamKey]: ParamSpec } = {
     step: 0.5,
     description:
       'Vertical height of the shade, following the trade rule of roughly one third of total lamp height.',
+  },
+  finialHeight: {
+    key: 'finialHeight',
+    label: 'Finial height',
+    unit: 'cm',
+    min: 0.5,
+    max: 20,
+    step: 0.1,
+    description:
+      'Height of the knob capping the shade. Most of it sits above the shade’s top rim, so it is part of the lamp’s overall height, not a decoration on top of it.',
   },
   shadeTopDiameter: {
     key: 'shadeTopDiameter',

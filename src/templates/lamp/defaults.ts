@@ -86,6 +86,13 @@ export const SHADE_RIM_HEIGHT = 0.025;
  */
 export const SHADE_RIM_PROJECTION = 0.018;
 
+/**
+ * How far below the shade's top rim the harp tops out, as a fraction of shade
+ * height. The finial screws on there, so this also fixes how much of the finial
+ * sits inside the shade rather than above it.
+ */
+export const HARP_TOP_INSET = 0.08;
+
 /** Harp: the wire loop carrying the shade. Diameter as a fraction of stem diameter. */
 export const HARP_WIRE_OVER_STEM_DIAMETER = 0.16;
 /** How far out the harp bows, as a fraction of the shade's bottom radius. */
@@ -93,6 +100,12 @@ export const HARP_SPREAD = 0.62;
 
 /** Finial: the knob capping the shade. Diameter as a fraction of shade top diameter. */
 export const FINIAL_DIAMETER_OVER_SHADE_TOP = 0.13;
+/**
+ * Ceiling on finial height as a fraction of the lamp's total height. A wide
+ * shade on a short lamp would otherwise scale the finial up until it ate the
+ * height budget the stem needs.
+ */
+export const MAX_FINIAL_OVER_TOTAL_HEIGHT = 0.09;
 /** Finial height as a fraction of its own diameter. */
 export const FINIAL_HEIGHT_OVER_DIAMETER = 1.9;
 

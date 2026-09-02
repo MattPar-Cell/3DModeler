@@ -12,6 +12,10 @@ import {
   SHADE_HEIGHT_OVER_TOTAL_HEIGHT,
   SHADE_TOP_OVER_BOTTOM_DIAMETER,
   SOCKET_DIAMETER_OVER_STEM_DIAMETER,
+  FINIAL_DIAMETER_OVER_SHADE_TOP,
+  FINIAL_HEIGHT_OVER_DIAMETER,
+  HARP_TOP_INSET,
+  MAX_FINIAL_OVER_TOTAL_HEIGHT,
   SOCKET_HEIGHT_OVER_SHADE_HEIGHT,
   STEM_BELLY,
   STEM_DIAMETER_OVER_BASE_DIAMETER,
@@ -224,44 +228,9 @@ export function solveLamp(input: LampSolveInput): LampSolution {
     });
   }
 
-  // --- 4. Heights: base + stem + socket + shade must equal total height ----
-  let baseHeight = H * BASE_HEIGHT_OVER_TOTAL_HEIGHT * p;
-  let shadeHeight = H * SHADE_HEIGHT_OVER_TOTAL_HEIGHT * p;
-  let socketHeight = shadeHeight * SOCKET_HEIGHT_OVER_SHADE_HEIGHT;
-  const minStemHeight = H * MIN_STEM_HEIGHT_OVER_TOTAL_HEIGHT;
-  let heightNote: string | undefined;
-
-  const consumed = () => baseHeight + shadeHeight + socketHeight;
-  if (H - consumed() < minStemHeight) {
-    // Shrink the inferred base and shade together until the stem fits.
-    const budget = H - minStemHeight;
-    const shrink = budget / consumed();
-    baseHeight *= shrink;
-    shadeHeight *= shrink;
-    socketHeight *= shrink;
-    heightNote = `Scaled down by ${(shrink * 100).toFixed(0)}% so the stem keeps at least ${(MIN_STEM_HEIGHT_OVER_TOTAL_HEIGHT * 100).toFixed(0)}% of the total height.`;
-    constraints.push({
-      id: 'stem-minimum-height',
-      description: `Stem height >= ${(MIN_STEM_HEIGHT_OVER_TOTAL_HEIGHT * 100).toFixed(0)}% of total height.`,
-      satisfied: true,
-      resolution: heightNote,
-    });
-  } else {
-    constraints.push({
-      id: 'stem-minimum-height',
-      description: `Stem height >= ${(MIN_STEM_HEIGHT_OVER_TOTAL_HEIGHT * 100).toFixed(0)}% of total height.`,
-      satisfied: true,
-    });
-  }
-  const stemHeight = H - baseHeight - shadeHeight - socketHeight;
-
-  constraints.push({
-    id: 'height-sum',
-    description: 'Base + stem + socket + shade heights sum to the total height.',
-    satisfied: Math.abs(baseHeight + stemHeight + socketHeight + shadeHeight - H) < 1e-6,
-  });
-
-  // --- 5. Shade taper and socket -----------------------------------------
+  // --- 4. Shade taper, socket and finial ----------------------------------
+  // Resolved before the heights, because the finial's height is part of the
+  // lamp's overall height and the height budget has to know about it.
   const socketDiameter = stemDiameter * SOCKET_DIAMETER_OVER_STEM_DIAMETER;
   let shadeTopDiameter = shadeDiameter * SHADE_TOP_OVER_BOTTOM_DIAMETER;
   let shadeTopNote: string | undefined;
@@ -282,12 +251,67 @@ export function solveLamp(input: LampSolveInput): LampSolution {
       satisfied: true,
     });
   }
+  const finialHeight = Math.min(
+    shadeTopDiameter * FINIAL_DIAMETER_OVER_SHADE_TOP * FINIAL_HEIGHT_OVER_DIAMETER,
+    H * MAX_FINIAL_OVER_TOTAL_HEIGHT,
+  );
 
-  /**
-   * Provenance propagation: a value computed from something that traces back to
-   * a measurement is `derived`, however many ratios sit in between. Only a
-   * chain that bottoms out entirely in template priors stays `estimated`.
-   */
+  // --- 5. Heights ---------------------------------------------------------
+  // Everything visible has to fit inside the entered total height, the finial
+  // included: it screws onto the harp just below the shade's top rim, so the
+  // part of it standing above that rim adds to the lamp's overall height. Miss
+  // this and the generated mesh comes out taller than the number the user typed.
+  let baseHeight = H * BASE_HEIGHT_OVER_TOTAL_HEIGHT * p;
+  let shadeHeight = H * SHADE_HEIGHT_OVER_TOTAL_HEIGHT * p;
+  let socketHeight = shadeHeight * SOCKET_HEIGHT_OVER_SHADE_HEIGHT;
+  const finialProtrusion = (): number =>
+    Math.max(0, finialHeight - shadeHeight * HARP_TOP_INSET);
+  const minStemHeight = H * MIN_STEM_HEIGHT_OVER_TOTAL_HEIGHT;
+  let heightNote: string | undefined;
+
+  const consumed = (): number => baseHeight + shadeHeight + socketHeight + finialProtrusion();
+  if (H - consumed() < minStemHeight) {
+    // Shrink the inferred base and shade together until the stem fits.
+    //
+    // Solved rather than iterated, because the finial's *protrusion* grows as
+    // the shade shrinks — it is fixed in size and only partly hidden inside the
+    // shade — so scaling the other parts by the naive ratio gives back less
+    // height than it takes and leaves the stem short.
+    const budget = H - minStemHeight;
+    const scalable = baseHeight + shadeHeight + socketHeight;
+    const shrink =
+      finialHeight > shadeHeight * HARP_TOP_INSET
+        ? (budget - finialHeight) / (scalable - shadeHeight * HARP_TOP_INSET)
+        : budget / consumed();
+    baseHeight *= shrink;
+    shadeHeight *= shrink;
+    socketHeight *= shrink;
+    heightNote = `Scaled down by ${(shrink * 100).toFixed(0)}% so the stem keeps at least ${(MIN_STEM_HEIGHT_OVER_TOTAL_HEIGHT * 100).toFixed(0)}% of the total height.`;
+    constraints.push({
+      id: 'stem-minimum-height',
+      description: `Stem height >= ${(MIN_STEM_HEIGHT_OVER_TOTAL_HEIGHT * 100).toFixed(0)}% of total height.`,
+      satisfied: true,
+      resolution: heightNote,
+    });
+  } else {
+    constraints.push({
+      id: 'stem-minimum-height',
+      description: `Stem height >= ${(MIN_STEM_HEIGHT_OVER_TOTAL_HEIGHT * 100).toFixed(0)}% of total height.`,
+      satisfied: true,
+    });
+  }
+  const stemHeight = H - baseHeight - shadeHeight - socketHeight - finialProtrusion();
+
+  constraints.push({
+    id: 'height-sum',
+    description:
+      'Base, stem, socket and shade heights, plus the part of the finial standing above the shade, sum to the total height.',
+    satisfied:
+      Math.abs(
+        baseHeight + stemHeight + socketHeight + shadeHeight + finialProtrusion() - H,
+      ) < 1e-6,
+  });
+
   const derivedFrom = (source: ResolvedParam): 'derived' | 'estimated' =>
     source.provenance === 'estimated' ? 'estimated' : 'derived';
 
@@ -351,6 +375,12 @@ export function solveLamp(input: LampSolveInput): LampSolution {
       shadeTopDiameter,
       derivedFrom(shadeDiameterParam),
       shadeTopNote,
+    ),
+    finialHeight: resolve(
+      LAMP_PARAM_SPECS.finialHeight,
+      finialHeight,
+      derivedFrom(shadeDiameterParam),
+      'Sized from the shade’s top opening, and counted in the total height.',
     ),
   };
 

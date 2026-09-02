@@ -4,7 +4,11 @@ import { solveLamp } from './solve.ts';
 import { buildLampParts } from './build.ts';
 import { meshVolume } from '../../core/loft.ts';
 import { LAMP_PARAM_SPECS } from './spec.ts';
-import { PROPORTION_MAX, SHADE_DIAMETER_OVER_BASE_DIAMETER } from './defaults.ts';
+import {
+  HARP_TOP_INSET,
+  PROPORTION_MAX,
+  SHADE_DIAMETER_OVER_BASE_DIAMETER,
+} from './defaults.ts';
 
 const TOLERANCE_CM = 1e-6;
 
@@ -26,14 +30,41 @@ test('entered measurements are reproduced exactly and marked measured', () => {
   }
 });
 
+/** The part of the finial that stands above the shade's top rim. */
+function finialProtrusion(params: ReturnType<typeof solveLamp>['params']): number {
+  return Math.max(0, params.finialHeight.value - params.shadeHeight.value * HARP_TOP_INSET);
+}
+
 test('part heights sum to the entered total height', () => {
   const { params } = solveLamp({ measurements: { totalHeight: 63 } });
   const sum =
     params.baseHeight.value +
     params.stemHeight.value +
     params.socketHeight.value +
-    params.shadeHeight.value;
+    params.shadeHeight.value +
+    finialProtrusion(params);
   assert.ok(Math.abs(sum - 63) < TOLERANCE_CM, `heights summed to ${sum}`);
+});
+
+test('the generated mesh is exactly as tall as the entered total height', () => {
+  // The finial screws on above the shade, so it has to be inside the budget —
+  // otherwise the lamp comes out taller than the number the user typed.
+  for (const totalHeight of [18, 45, 120, 195]) {
+    const { params } = solveLamp({ measurements: { totalHeight } });
+    const parts = buildLampParts(params);
+    let top = -Infinity;
+    let bottom = Infinity;
+    for (const part of parts) {
+      const box = part.geometry.boundingBox;
+      if (box === null) continue;
+      top = Math.max(top, box.max.y);
+      bottom = Math.min(bottom, box.min.y);
+    }
+    assert.ok(
+      Math.abs(top - bottom - totalHeight) < 0.05,
+      `${totalHeight} cm lamp generated a mesh ${(top - bottom).toFixed(2)} cm tall`,
+    );
+  }
 });
 
 test('the height-sum constraint reports satisfied across the plausible range', () => {
