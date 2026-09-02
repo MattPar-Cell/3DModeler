@@ -62,6 +62,8 @@ function Parts({ parts, confidenceShading }: { parts: readonly GeneratedPart[]; 
               color={confidenceShading ? PROVENANCE_COLORS[part.confidence] : part.color}
               roughness={part.roughness}
               metalness={confidenceShading ? 0.05 : part.metalness}
+              emissive={confidenceShading ? '#000000' : part.emissive}
+              emissiveIntensity={confidenceShading ? 0 : part.emissiveIntensity}
               transparent={translucent}
               opacity={opacity}
               depthWrite={!translucent}

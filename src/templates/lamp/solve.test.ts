@@ -178,7 +178,7 @@ test('every generated part is a closed or intentionally open solid with real vol
   const parts = buildLampParts(params);
   assert.deepEqual(
     parts.map((p) => p.id),
-    ['base', 'stem', 'socket', 'shade'],
+    ['base', 'stem', 'socket', 'harp-l', 'harp-r', 'shade', 'finial'],
   );
   for (const part of parts) {
     const position = part.geometry.getAttribute('position');
@@ -221,4 +221,56 @@ test('regenerating the model stays inside the interaction budget', () => {
   }
   const perRun = (performance.now() - start) / runs;
   assert.ok(perRun < 100, `regeneration took ${perRun.toFixed(2)} ms, budget is 100 ms`);
+});
+
+test('the harp arcs clear of the bulb and meets the finial', () => {
+  const { params } = solveLamp({
+    measurements: { totalHeight: 45, baseDiameter: 13, shadeDiameter: 25, stemDiameter: 3 },
+  });
+  const parts = buildLampParts(params);
+  const harp = parts.find((p) => p.id === 'harp-l');
+  const finial = parts.find((p) => p.id === 'finial');
+  assert.ok(harp !== undefined && finial !== undefined);
+
+  // The harp is a solid tube, wound outward like everything else.
+  assert.ok(meshVolume(harp.geometry) > 0);
+
+  const harpBox = harp.geometry.boundingBox;
+  const finialBox = finial.geometry.boundingBox;
+  assert.ok(harpBox !== null && finialBox !== null);
+
+  // It must bow out far enough to clear the socket but stay inside the shade.
+  assert.ok(harpBox.max.x > params.socketDiameter.value / 2, 'harp does not clear the socket');
+  assert.ok(harpBox.max.x < params.shadeDiameter.value / 2, 'harp pokes through the shade');
+  // ...and the finial sits on top of it.
+  assert.ok(
+    Math.abs(finialBox.min.y - harpBox.max.y) < 1,
+    `finial base ${finialBox.min.y} is not at the harp top ${harpBox.max.y}`,
+  );
+});
+
+test('the shade bows outward from the straight cone between its rims', () => {
+  const { params } = solveLamp({
+    measurements: { totalHeight: 45, shadeDiameter: 30 },
+  });
+  const parts = buildLampParts(params);
+  const shade = parts.find((p) => p.id === 'shade');
+  assert.ok(shade !== undefined);
+
+  const bottom = params.shadeDiameter.value / 2;
+  const top = params.shadeTopDiameter.value / 2;
+  const position = shade.geometry.getAttribute('position');
+  const height = params.shadeHeight.value;
+  const y3 = shade.geometry.boundingBox?.min.y ?? 0;
+
+  let maxExcess = 0;
+  for (let i = 0; i < position.count; i += 1) {
+    const t = (position.getY(i) - y3) / height;
+    if (t < 0.2 || t > 0.8) continue; // skip the rims
+    const straightCone = bottom + (top - bottom) * t;
+    const radius = Math.hypot(position.getX(i), position.getZ(i));
+    maxExcess = Math.max(maxExcess, radius - straightCone);
+  }
+  assert.ok(maxExcess > 0.05, 'the shade side is dead straight');
+  assert.ok(maxExcess < bottom * 0.05, `bow of ${maxExcess.toFixed(2)} cm is too pronounced`);
 });

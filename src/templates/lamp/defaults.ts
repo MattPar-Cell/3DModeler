@@ -62,11 +62,39 @@ export const SOCKET_HEIGHT_OVER_SHADE_HEIGHT = 0.18;
 /** Socket diameter as a fraction of stem diameter. */
 export const SOCKET_DIAMETER_OVER_STEM_DIAMETER = 1.35;
 
-/** Ring/loft resolution. 64 segments keeps a 30 cm shade visually smooth. */
-export const RADIAL_SEGMENTS = 64;
+/** Ring/loft resolution. 96 segments keeps a 50 cm shade rim visually smooth. */
+export const RADIAL_SEGMENTS = 96;
 
 /** Rings per part along the vertical axis for the tapered/bellied parts. */
-export const PROFILE_ROWS = 24;
+export const PROFILE_ROWS = 40;
+
+/**
+ * The shade's side bows outward slightly rather than running dead straight.
+ * A drum or empire shade is cut from a flat pattern, so its side is a straight
+ * line in elevation; a fabric one relaxes into a shallow convex curve. This is
+ * the bulge at mid height as a fraction of the mean radius.
+ */
+export const SHADE_BOW = 0.022;
+
+/** Rolled rim at the top and bottom of the shade, as a fraction of its height. */
+export const SHADE_RIM_HEIGHT = 0.025;
+/**
+ * How far the rim stands proud of the shade's surface, as a fraction of the
+ * shade's mean radius. This is a wire ring wrapped in fabric — a couple of
+ * millimetres on a real shade. Push it to a centimetre and the shade stops
+ * looking like a shade and starts looking like a bell.
+ */
+export const SHADE_RIM_PROJECTION = 0.018;
+
+/** Harp: the wire loop carrying the shade. Diameter as a fraction of stem diameter. */
+export const HARP_WIRE_OVER_STEM_DIAMETER = 0.16;
+/** How far out the harp bows, as a fraction of the shade's bottom radius. */
+export const HARP_SPREAD = 0.62;
+
+/** Finial: the knob capping the shade. Diameter as a fraction of shade top diameter. */
+export const FINIAL_DIAMETER_OVER_SHADE_TOP = 0.13;
+/** Finial height as a fraction of its own diameter. */
+export const FINIAL_HEIGHT_OVER_DIAMETER = 1.9;
 
 /**
  * Fallback base diameter when the user has entered neither a base nor a shade

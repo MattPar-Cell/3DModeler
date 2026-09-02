@@ -94,3 +94,96 @@ export function sumSquaredError(pairs: ReadonlyArray<readonly [number, number | 
 export function isPositiveFinite(v: number | undefined | null): v is number {
   return typeof v === 'number' && Number.isFinite(v) && v > 0;
 }
+
+/**
+ * Monotone cubic interpolation (Fritsch-Carlson).
+ *
+ * Returns a function that passes exactly through every control point, is smooth
+ * between them, and — crucially — never overshoots the data.
+ *
+ * This replaced per-span smoothstep for both the lamp profiles and the body
+ * ones. Smoothstep forces the slope to zero at *every* control point, so a
+ * profile through eight control sections came out as eight plateaus joined by
+ * ramps, which reads on a curved surface like a head as a stack of visible
+ * bands. Plain cubic splines fix the banding but overshoot, which on a body
+ * means a bulge just above a measured chest that is wider than the chest
+ * itself. Monotone cubic gives the smoothness without ever exceeding a
+ * measurement.
+ *
+ * @param xs Strictly increasing control positions.
+ * @param ys Values at those positions.
+ */
+export function monotoneCubicAt(
+  xs: readonly number[],
+  ys: readonly number[],
+): (x: number) => number {
+  const n = Math.min(xs.length, ys.length);
+  if (n === 0) return () => 0;
+  if (n === 1) return () => ys[0] ?? 0;
+
+  const h = new Array<number>(n - 1);
+  const secant = new Array<number>(n - 1);
+  for (let i = 0; i < n - 1; i += 1) {
+    const dx = (xs[i + 1] ?? 0) - (xs[i] ?? 0);
+    h[i] = dx;
+    secant[i] = dx === 0 ? 0 : ((ys[i + 1] ?? 0) - (ys[i] ?? 0)) / dx;
+  }
+
+  // Initial tangents: the average of the neighbouring secants, except at a
+  // local extremum — where the secants change sign — which must be flat, or
+  // the curve sails past the peak value on its way through it.
+  const tangent = new Array<number>(n);
+  tangent[0] = secant[0] ?? 0;
+  tangent[n - 1] = secant[n - 2] ?? 0;
+  for (let i = 1; i < n - 1; i += 1) {
+    const before = secant[i - 1] ?? 0;
+    const after = secant[i] ?? 0;
+    tangent[i] = before * after <= 0 ? 0 : (before + after) / 2;
+  }
+
+  // Fritsch-Carlson limiter: clamp tangents into the circle of radius 3 so no
+  // span can overshoot the values that bracket it.
+  for (let i = 0; i < n - 1; i += 1) {
+    const d = secant[i] ?? 0;
+    if (d === 0) {
+      tangent[i] = 0;
+      tangent[i + 1] = 0;
+      continue;
+    }
+    const alpha = (tangent[i] ?? 0) / d;
+    const beta = (tangent[i + 1] ?? 0) / d;
+    const magnitude = alpha * alpha + beta * beta;
+    if (magnitude > 9) {
+      const tau = 3 / Math.sqrt(magnitude);
+      tangent[i] = tau * alpha * d;
+      tangent[i + 1] = tau * beta * d;
+    }
+  }
+
+  return (x: number): number => {
+    if (x <= (xs[0] ?? 0)) return ys[0] ?? 0;
+    if (x >= (xs[n - 1] ?? 0)) return ys[n - 1] ?? 0;
+    let i = 0;
+    while (i < n - 2 && x > (xs[i + 1] ?? 0)) i += 1;
+    const span = h[i] ?? 1;
+    const s = span === 0 ? 0 : (x - (xs[i] ?? 0)) / span;
+    const s2 = s * s;
+    const s3 = s2 * s;
+    return (
+      (2 * s3 - 3 * s2 + 1) * (ys[i] ?? 0) +
+      (s3 - 2 * s2 + s) * span * (tangent[i] ?? 0) +
+      (-2 * s3 + 3 * s2) * (ys[i + 1] ?? 0) +
+      (s3 - s2) * span * (tangent[i + 1] ?? 0)
+    );
+  };
+}
+
+/**
+ * {@link monotoneCubicAt} for evenly spaced values, parameterised by index.
+ */
+export function monotoneCubic(values: readonly number[]): (t: number) => number {
+  return monotoneCubicAt(
+    values.map((_, i) => i),
+    values,
+  );
+}

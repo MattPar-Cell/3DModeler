@@ -327,9 +327,13 @@ export function fitBody(input: BodyFitInput): BodyFit {
     targetMass = A.DEFAULT_BMI * (H / 100) ** 2;
   }
 
+  // Volume is corrected for polygon inscription, so a coarse trial mesh gives
+  // the same mass as the fine one the viewer shows — the search can afford to
+  // run at a quarter of the cost without shifting the answer it converges on.
   const massOf = (girthScale: number): number => {
     const values = assembleValues(m, H, girthScale, torsoFactor, limbFactor);
-    return measureBody(buildBodySegments(values), buildSkeleton(values)).mass;
+    const trial = buildBodySegments(values, A.FIT_RADIAL_SEGMENTS);
+    return measureBody(trial, buildSkeleton(values)).mass;
   };
 
   let girthScale = 1;

@@ -182,31 +182,84 @@ export const WRIST_CIRCUMFERENCE_SPREAD = 0.007;
 
 // ---------------------------------------------------------------------------
 // Cross-section shape
+//
 // Depth-to-width ratios and super-ellipse exponents. A human cross-section is
-// neither a circle nor an ellipse: the torso is measurably flatter front-to-back
-// than an ellipse of the same perimeter, and limbs are close to round.
-// Figures are fitted from published torso-scan cross-section geometry and are
-// the least firmly sourced numbers in this file; they affect the silhouette but
-// not the circumferences, which are matched exactly by construction.
+// neither a circle nor an ellipse, and it is not front-back symmetric either:
+// a hip section is far deeper behind the spine than in front of it, a belly is
+// the reverse, and a calf carries almost all its bulk at the back. Each section
+// therefore carries a *front* and a *back* depth ratio.
+//
+// These figures are read off published torso and limb scan cross-sections and
+// are the least firmly sourced numbers in this file. They change the silhouette
+// and shift volume around, but they cannot change a circumference: the ring
+// generator scales every section so its perimeter is exactly the measurement.
 // ---------------------------------------------------------------------------
 
-/** Depth / width of the chest cross-section. */
+/** Mean depth / width of the chest cross-section. */
 export const CHEST_ASPECT = 0.72;
-/** Depth / width at the waist. */
+/** Chest depth in front of the spine, as a multiple of the mean. Pectorals. */
+export const CHEST_FRONT_BIAS = 1.16;
+/** Chest depth behind the spine. Flatter than the front. */
+export const CHEST_BACK_BIAS = 0.84;
+
+/** Mean depth / width at the waist. */
 export const WAIST_ASPECT = 0.78;
-/** Depth / width at the hips. */
+/** Abdomen projects forward more than the lumbar spine does back. */
+export const WAIST_FRONT_BIAS = 1.12;
+export const WAIST_BACK_BIAS = 0.88;
+
+/** Mean depth / width at the hips. */
 export const HIP_ASPECT = 0.74;
-/** Depth / width of the neck. */
+/** The buttocks are the strongest front-back asymmetry anywhere on the body. */
+export const HIP_FRONT_BIAS = 0.7;
+export const HIP_BACK_BIAS = 1.3;
+
+/** Depth / width of the neck, which is close to round. */
 export const NECK_ASPECT = 0.92;
 /** Depth / width of limb cross-sections. */
 export const LIMB_ASPECT = 0.94;
+
+/** The calf carries its bulk behind the tibia. */
+export const CALF_FRONT_BIAS = 0.74;
+export const CALF_BACK_BIAS = 1.26;
+/** The thigh is slightly deeper at the back than the front. */
+export const THIGH_FRONT_BIAS = 0.92;
+export const THIGH_BACK_BIAS = 1.08;
+
 /** Depth / width of the head, which is longer front-to-back than it is wide. */
 export const HEAD_ASPECT = 1.24;
+/** The occiput projects further behind the ear canal than the face does ahead. */
+export const HEAD_FRONT_BIAS = 0.86;
+export const HEAD_BACK_BIAS = 1.14;
 
 /** Super-ellipse exponent for torso cross-sections. 2 would be a plain ellipse. */
 export const TORSO_SQUARENESS = 2.45;
 /** Super-ellipse exponent for limb cross-sections. */
 export const LIMB_SQUARENESS = 2.1;
+/** Super-ellipse exponent for the skull, which is rounder than the torso. */
+export const HEAD_SQUARENESS = 2.0;
+
+// ---------------------------------------------------------------------------
+// Posture
+//
+// The spine is not straight. Sagittal offsets of each cross-section's centre,
+// as fractions of stature, positive toward the front of the body. Magnitudes
+// follow the standing sagittal curvature reported in postural-assessment
+// literature: a thoracic kyphosis of roughly 2-3 cm of posterior offset at the
+// mid-back and a lumbar lordosis of similar magnitude forward at the waist,
+// on a 175 cm frame.
+// ---------------------------------------------------------------------------
+
+/** Sagittal offset at the hips. Near the reference line. */
+export const SPINE_OFFSET_HIP = -0.002;
+/** Lumbar lordosis: the waist sits forward of the line through hip and shoulder. */
+export const SPINE_OFFSET_WAIST = 0.006;
+/** Thoracic kyphosis: the upper back sits behind it. */
+export const SPINE_OFFSET_CHEST = -0.004;
+/** The shoulders sit a little further back again. */
+export const SPINE_OFFSET_SHOULDER = -0.008;
+/** Cervical lordosis carries the head forward over the chest. */
+export const SPINE_OFFSET_HEAD = 0.004;
 
 // ---------------------------------------------------------------------------
 // Mass
@@ -249,6 +302,27 @@ export const GIRTH_SCALE_MAX = 2.0;
 export const ARM_ABDUCTION_RAD = 0.21;
 /** Leg abduction from vertical, radians. Feet a little under the hips. */
 export const LEG_ABDUCTION_RAD = 0.045;
+/**
+ * Elbow flexion in a relaxed stance, radians. A hanging arm is never straight;
+ * a few degrees swings the forearm and hand forward of the shoulder.
+ */
+export const ARM_FLEXION_RAD = 0.11;
+/**
+ * How far the heel projects behind the ankle joint, as a fraction of foot
+ * length. The ankle sits roughly a quarter of the way along the foot.
+ */
+export const HEEL_BEHIND_ANKLE = 0.26;
 
 /** Ring resolution for body segments. */
-export const BODY_RADIAL_SEGMENTS = 48;
+export const BODY_RADIAL_SEGMENTS = 72;
+
+/**
+ * Ring resolution used inside the girth search. Volume converges much faster
+ * than silhouette does, and the search evaluates the whole body ~25 times per
+ * fit. The *final* body is always built at {@link BODY_RADIAL_SEGMENTS}; this
+ * only sets how finely each trial is measured.
+ */
+export const FIT_RADIAL_SEGMENTS = 32;
+
+/** Interpolated rings inserted between each pair of control slices. */
+export const BODY_SLICE_SMOOTHING = 4;

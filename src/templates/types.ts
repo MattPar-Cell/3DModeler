@@ -14,6 +14,9 @@ export interface GeneratedPart {
   readonly color: string;
   readonly roughness: number;
   readonly metalness: number;
+  /** Emitted colour, for surfaces lit from within such as a lampshade. */
+  readonly emissive: string;
+  readonly emissiveIntensity: number;
   /** Render both faces. Set for open shells such as a lamp shade. */
   readonly doubleSided: boolean;
   /** Extra opacity multiplier, used to fade purely inferred body regions. */

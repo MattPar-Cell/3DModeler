@@ -19,7 +19,7 @@ import type { Provenance } from '../core/params.ts';
 export const ESTIMATED_REGION_OPACITY = 0.42;
 
 /** Matte studio clay. Deliberately not skin-toned: this is a measurement aid. */
-const SKIN = { color: '#cbb5a4', roughness: 0.88, metalness: 0.0 };
+const SKIN = { color: '#cbb5a4', roughness: 0.82, metalness: 0.0 };
 
 export interface GeneratedBody extends GeneratedModel<BodyParamKey> {
   readonly fit: BodyFit;
@@ -46,6 +46,8 @@ export function buildBody(input: BodyFitInput): GeneratedBody {
       color: SKIN.color,
       roughness: SKIN.roughness,
       metalness: SKIN.metalness,
+      emissive: '#000000',
+      emissiveIntensity: 0,
       doubleSided: false,
       opacity: provenance === 'estimated' ? ESTIMATED_REGION_OPACITY : 1,
       confidence: provenance,

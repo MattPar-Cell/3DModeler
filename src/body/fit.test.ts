@@ -361,3 +361,92 @@ test('a body with only a height entered lands on the default BMI', () => {
     );
   }
 });
+
+test('reported mass does not depend on mesh resolution', () => {
+  // The girth search runs on a coarse mesh and the viewer shows a fine one, so
+  // the inscription correction in bodyVolumeLitres has to hold them together.
+  const values = priorBody(175.6);
+  const coarse = bodyVolumeLitres(buildBodySegments(values, 24));
+  const fine = bodyVolumeLitres(buildBodySegments(values, 128));
+  assert.ok(
+    Math.abs(coarse - fine) / fine < 0.006,
+    `24 segments gave ${coarse.toFixed(2)} L, 128 gave ${fine.toFixed(2)} L`,
+  );
+});
+
+test('the spine curve does not corrupt torso circumferences', () => {
+  // Torso sections are centred on a curved spine, so their centres move
+  // front-to-back between rings. A tape around a chest is horizontal, so that
+  // motion must not be treated as a limb-style tilt.
+  const fit = fitBody({ measurements: { stature: 178, chest: 104, waist: 88, hip: 106 } });
+  for (const key of ['chest', 'waist', 'hip'] as const) {
+    const residual = fit.residuals.find((r) => r.key === key);
+    assert.ok(residual !== undefined);
+    assert.ok(
+      Math.abs(residual.error) < 0.05,
+      `${key} off by ${residual.error.toFixed(3)} cm once the spine curves`,
+    );
+  }
+});
+
+test('the torso is offset front-to-back by the spine curve', () => {
+  const fit = fitBody({ measurements: { stature: 175 } });
+  const s = fit.skeleton;
+  // Lumbar lordosis forward, thoracic kyphosis back — a real standing posture,
+  // not a stack of concentric tubes.
+  assert.ok(s.spineAt(s.waistY) > s.spineAt(s.chestY), 'no sagittal curve');
+  assert.ok(s.spineAt(s.waistY) > s.spineAt(s.hipY));
+  assert.ok(Math.abs(s.spineAt(s.waistY)) < 0.02 * 175, 'curve is implausibly large');
+});
+
+test('the hips are deeper behind the spine than in front', () => {
+  const fit = fitBody({ measurements: { stature: 178, hip: 100 } });
+  const pelvis = fit.segments.find((seg) => seg.id === 'pelvis');
+  assert.ok(pelvis !== undefined);
+  const hipRing = pelvis.rings.reduce((best, ring) =>
+    Math.abs((ring[0]?.y ?? 0) - fit.skeleton.hipY) <
+    Math.abs((best[0]?.y ?? 0) - fit.skeleton.hipY)
+      ? ring
+      : best,
+  );
+  const centre = fit.skeleton.spineAt(fit.skeleton.hipY);
+  let front = 0;
+  let back = 0;
+  for (const p of hipRing) {
+    front = Math.max(front, p.z - centre);
+    back = Math.max(back, centre - p.z);
+  }
+  assert.ok(back > front * 1.5, `buttocks not modelled: front ${front.toFixed(1)}, back ${back.toFixed(1)}`);
+});
+
+test('the foot reaches forward of the ankle and rests on the floor', () => {
+  const fit = fitBody({ measurements: { stature: 178 } });
+  const foot = fit.segments.find((seg) => seg.id === 'foot-l');
+  assert.ok(foot !== undefined);
+  let minY = Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  for (const ring of foot.rings) {
+    for (const p of ring) {
+      minY = Math.min(minY, p.y);
+      minZ = Math.min(minZ, p.z);
+      maxZ = Math.max(maxZ, p.z);
+    }
+  }
+  assert.ok(minY >= -0.01 && minY < 0.01, `sole sits at y = ${minY.toFixed(2)}`);
+  const length = maxZ - minZ;
+  assert.ok(
+    Math.abs(length - fit.values.footLength) / fit.values.footLength < 0.05,
+    `foot is ${length.toFixed(1)} cm long, expected ${fit.values.footLength.toFixed(1)}`,
+  );
+  assert.ok(minZ < 0 && maxZ > 0, 'the heel should sit behind the ankle and the toes in front');
+});
+
+test('a foot encloses a plausible volume', () => {
+  const fit = fitBody({ measurements: { stature: 178, mass: 78 } });
+  const foot = fit.segments.find((seg) => seg.id === 'foot-l');
+  assert.ok(foot !== undefined);
+  const litres = bodyVolumeLitres([foot]);
+  // An adult foot displaces roughly 0.8-1.2 litres.
+  assert.ok(litres > 0.6 && litres < 1.5, `foot volume ${litres.toFixed(2)} L`);
+});

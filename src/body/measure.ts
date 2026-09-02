@@ -32,15 +32,23 @@ function centroidXZ(ring: Ring): { x: number; z: number } {
 }
 
 /**
- * Circumference perpendicular to the segment's axis at ring `i`.
+ * The circumference a tape would read at ring `i`.
  *
- * Rings are horizontal, so a leaning segment's ring is longer than the
- * cross-section a tape would read. This applies the inverse of the correction
- * `segments.ts` makes when it builds them.
+ * Limb rings are horizontal while the tape follows the limb, so a leaning
+ * segment's ring is longer than the cross-section a tape reads and the tilt has
+ * to be divided back out. Torso measurements are taken horizontally, so no
+ * correction applies there — and applying one anyway put a 0.6 cm error into
+ * every chest reading once the spine gained its sagittal curve.
  */
-function perpendicularCircumference(rings: readonly Ring[], i: number): number {
+function measuredCircumference(
+  rings: readonly Ring[],
+  i: number,
+  perpendicular: boolean,
+): number {
   const ring = rings[i];
   if (ring === undefined) return 0;
+  if (!perpendicular) return ringCircumference(ring);
+
   const previous = rings[Math.max(i - 1, 0)];
   const next = rings[Math.min(i + 1, rings.length - 1)];
   let tiltFactor = 1;
@@ -66,6 +74,7 @@ export function circumferenceAt(
   const segment = segments.find((s) => s.id === segmentId);
   if (segment === undefined || segment.rings.length < 2) return undefined;
   const rings = segment.rings;
+  const perpendicular = segment.perpendicularMeasurement;
 
   let best: number | undefined;
   let bestDistance = Number.POSITIVE_INFINITY;
@@ -77,8 +86,8 @@ export function circumferenceAt(
     const hi = Math.max(y0, y1);
     if (y >= lo && y <= hi) {
       const t = hi === lo ? 0 : (y - y0) / (y1 - y0);
-      const c0 = perpendicularCircumference(rings, i);
-      const c1 = perpendicularCircumference(rings, i + 1);
+      const c0 = measuredCircumference(rings, i, perpendicular);
+      const c1 = measuredCircumference(rings, i + 1, perpendicular);
       return c0 + (c1 - c0) * t;
     }
     // Track the nearest ring so a landmark just outside the segment (which
@@ -90,7 +99,7 @@ export function circumferenceAt(
       const distance = Math.abs(ringY - y);
       if (distance < bestDistance) {
         bestDistance = distance;
-        best = perpendicularCircumference(rings, index);
+        best = measuredCircumference(rings, index, perpendicular);
       }
     }
   }

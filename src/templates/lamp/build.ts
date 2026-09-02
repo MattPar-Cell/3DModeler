@@ -1,10 +1,21 @@
 import { loftGeometry } from '../../core/loft.ts';
 import type { Ring } from '../../core/loft.ts';
-import { circleRing, revolveProfile } from '../../core/profile.ts';
+import { circleRing, revolveProfile, tubeRings } from '../../core/profile.ts';
 import type { ProfilePoint } from '../../core/profile.ts';
 import type { Provenance } from '../../core/params.ts';
 import type { GeneratedModel, GeneratedPart } from '../types.ts';
-import { PROFILE_ROWS, RADIAL_SEGMENTS, STEM_BELLY_POSITION } from './defaults.ts';
+import {
+  FINIAL_DIAMETER_OVER_SHADE_TOP,
+  FINIAL_HEIGHT_OVER_DIAMETER,
+  HARP_SPREAD,
+  HARP_WIRE_OVER_STEM_DIAMETER,
+  PROFILE_ROWS,
+  RADIAL_SEGMENTS,
+  SHADE_BOW,
+  SHADE_RIM_HEIGHT,
+  SHADE_RIM_PROJECTION,
+  STEM_BELLY_POSITION,
+} from './defaults.ts';
 import { solveLamp } from './solve.ts';
 import type { LampSolveInput } from './solve.ts';
 import type { LampParamKey, LampParams } from './spec.ts';
@@ -33,17 +44,30 @@ function confidenceOf(params: LampParams, keys: readonly LampParamKey[]): Proven
 }
 
 const MATERIALS = {
-  base: { color: '#c9c2b6', roughness: 0.55, metalness: 0.05 },
-  stem: { color: '#b9b1a3', roughness: 0.5, metalness: 0.08 },
-  socket: { color: '#6f6a63', roughness: 0.35, metalness: 0.55 },
-  shade: { color: '#f0e9dc', roughness: 0.9, metalness: 0.0 },
+  /** Glazed ceramic: fairly smooth, no metallic component. */
+  base: { color: '#cfc6b6', roughness: 0.42, metalness: 0.03, emissive: '#000000', emissiveIntensity: 0 },
+  stem: { color: '#c3b9a6', roughness: 0.4, metalness: 0.06, emissive: '#000000', emissiveIntensity: 0 },
+  /** Brushed brass hardware. */
+  socket: { color: '#8a7a5c', roughness: 0.32, metalness: 0.72, emissive: '#000000', emissiveIntensity: 0 },
+  /**
+   * Shade fabric. The emissive term stands in for light passing through the
+   * cloth from the bulb inside — the single cue that most makes a truncated
+   * cone read as a lampshade rather than a paper cup.
+   */
+  shade: { color: '#f2e7d2', roughness: 0.95, metalness: 0.0, emissive: '#ffdfa8', emissiveIntensity: 0.22 },
 } as const;
 
 function part(
   id: string,
   label: string,
   rings: readonly Ring[],
-  material: { color: string; roughness: number; metalness: number },
+  material: {
+    color: string;
+    roughness: number;
+    metalness: number;
+    emissive: string;
+    emissiveIntensity: number;
+  },
   confidence: Provenance,
   drivenBy: readonly LampParamKey[],
   options?: { capStart?: boolean; capEnd?: boolean },
@@ -56,6 +80,8 @@ function part(
     color: material.color,
     roughness: material.roughness,
     metalness: material.metalness,
+    emissive: material.emissive,
+    emissiveIntensity: material.emissiveIntensity,
     doubleSided: open,
     opacity: 1,
     confidence,
@@ -64,28 +90,68 @@ function part(
 }
 
 /**
- * Base profile: a wide foot that rolls in with a soft shoulder and tapers to
- * the neck the stem seats on. Control points are fractions of base height.
+ * Base profile: a turned form — a low plinth, a torus-like swell, a cove that
+ * cuts back in, and a neck for the stem to seat on. Control points are
+ * fractions of base height, and the monotone profile interpolation in
+ * `revolveProfile` turns them into a continuous curve without letting any span
+ * bulge past a control radius.
  */
 function baseProfile(bottomRadius: number, topRadius: number): ProfilePoint[] {
-  const shoulder = bottomRadius * 0.98;
   return [
-    { t: 0, radius: bottomRadius * 0.92 },
-    { t: 0.06, radius: bottomRadius },
-    { t: 0.3, radius: shoulder },
-    { t: 0.62, radius: (shoulder + topRadius) * 0.5 },
+    { t: 0, radius: bottomRadius * 0.9 },
+    { t: 0.04, radius: bottomRadius * 0.995 },
+    // A narrow fillet above the plinth, the classic turned step.
+    { t: 0.11, radius: bottomRadius * 0.955 },
+    { t: 0.16, radius: bottomRadius * 0.985 },
+    { t: 0.3, radius: bottomRadius * 0.93 },
+    // The cove: the profile cuts in sharply toward the neck.
+    { t: 0.55, radius: lerpRadius(bottomRadius, topRadius, 0.62) },
+    { t: 0.78, radius: topRadius * 1.12 },
+    { t: 0.9, radius: topRadius * 0.94 },
     { t: 1, radius: topRadius },
   ];
 }
 
-/** Stem profile: a straight column with a single classical belly. */
+function lerpRadius(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
+
+/** Stem profile: a turned column with a collar, a belly and a neck ring. */
 function stemProfile(radius: number, belly: number): ProfilePoint[] {
   return [
-    { t: 0, radius: radius * 1.12 },
-    { t: 0.12, radius },
+    { t: 0, radius: radius * 1.18 },
+    { t: 0.05, radius: radius * 1.02 },
+    { t: 0.1, radius: radius * 1.1 },
+    { t: 0.16, radius },
     { t: STEM_BELLY_POSITION, radius: radius * belly },
-    { t: 0.86, radius },
-    { t: 1, radius: radius * 1.05 },
+    { t: 0.78, radius: radius * 1.01 },
+    { t: 0.88, radius: radius * 1.09 },
+    { t: 0.94, radius: radius * 0.98 },
+    { t: 1, radius: radius * 1.04 },
+  ];
+}
+
+/**
+ * Shade profile: a shallow convex bow with a rolled rim at each end.
+ *
+ * A shade cut from a flat pattern is a straight-sided cone; a fabric one
+ * relaxes outward a little, and both ends are wrapped over a wire ring that
+ * stands slightly proud of the surface. Those two details are most of what
+ * separates a lampshade from a truncated cone.
+ */
+function shadeProfile(bottomRadius: number, topRadius: number): ProfilePoint[] {
+  const at = (t: number): number => lerpRadius(bottomRadius, topRadius, t);
+  const mean = (bottomRadius + topRadius) / 2;
+  const bow = mean * SHADE_BOW;
+  const rim = mean * SHADE_RIM_PROJECTION;
+  return [
+    { t: 0, radius: bottomRadius + rim },
+    { t: SHADE_RIM_HEIGHT, radius: bottomRadius },
+    { t: 0.3, radius: at(0.3) + bow * 0.85 },
+    { t: 0.5, radius: at(0.5) + bow },
+    { t: 0.7, radius: at(0.7) + bow * 0.85 },
+    { t: 1 - SHADE_RIM_HEIGHT, radius: topRadius },
+    { t: 1, radius: topRadius + rim },
   ];
 }
 
@@ -155,20 +221,79 @@ export function buildLampParts(params: LampParams): GeneratedPart[] {
     ),
   );
 
-  // Shade: an open-ended truncated cone, so both rims read as openings.
-  const shadeRings: Ring[] = [
-    circleRing(shadeBottomR, y3, RADIAL_SEGMENTS),
-    circleRing(shadeTopR, y4, RADIAL_SEGMENTS),
-  ];
+  // Harp: the wire loop that carries the shade. Two arcs springing from the
+  // socket, bowing out past the bulb and drawing back in under the finial.
+  const harpRadius = (stemR * 2 * HARP_WIRE_OVER_STEM_DIAMETER) / 2;
+  const harpSpread = shadeBottomR * HARP_SPREAD;
+  const harpTopY = y4 - shadeHeight * 0.08;
+  for (const sign of [1, -1] as const) {
+    const pathPoints = 24;
+    const path = Array.from({ length: pathPoints }, (_, i) => {
+      const t = i / (pathPoints - 1);
+      // A single smooth arc: out to the widest point at mid height, back in.
+      const spread = Math.sin(Math.PI * Math.min(t * 1.06, 1)) ** 0.85;
+      return {
+        x: sign * (stemR * 0.7 + (harpSpread - stemR * 0.7) * spread),
+        y: y3 - socketHeight * 0.25 + (harpTopY - (y3 - socketHeight * 0.25)) * t,
+        z: 0,
+      };
+    });
+    parts.push(
+      part(
+        `harp-${sign > 0 ? 'l' : 'r'}`,
+        `Harp (${sign > 0 ? 'left' : 'right'})`,
+        tubeRings(path, harpRadius, 12),
+        MATERIALS.socket,
+        confidenceOf(params, ['stemDiameter', 'shadeDiameter']),
+        ['stemDiameter', 'shadeDiameter'],
+      ),
+    );
+  }
+
+  // Shade: a shallow convex bow with a rolled rim at each end, open at both.
   parts.push(
     part(
       'shade',
       'Shade',
-      shadeRings,
+      revolveProfile(
+        shadeProfile(shadeBottomR, shadeTopR),
+        y3,
+        y4,
+        PROFILE_ROWS,
+        RADIAL_SEGMENTS,
+      ),
       MATERIALS.shade,
       confidenceOf(params, ['shadeDiameter', 'shadeTopDiameter', 'shadeHeight']),
       ['shadeDiameter', 'shadeTopDiameter', 'shadeHeight'],
       { capStart: false, capEnd: false },
+    ),
+  );
+
+  // Finial: the knob that screws onto the harp and holds the shade down.
+  const finialR = (shadeTopR * 2 * FINIAL_DIAMETER_OVER_SHADE_TOP) / 2;
+  const finialHeight = finialR * 2 * FINIAL_HEIGHT_OVER_DIAMETER;
+  parts.push(
+    part(
+      'finial',
+      'Finial',
+      revolveProfile(
+        [
+          { t: 0, radius: finialR * 0.34 },
+          { t: 0.12, radius: finialR * 0.42 },
+          { t: 0.2, radius: finialR * 0.3 },
+          { t: 0.42, radius: finialR },
+          { t: 0.62, radius: finialR * 0.88 },
+          { t: 0.82, radius: finialR * 0.5 },
+          { t: 1, radius: finialR * 0.16 },
+        ],
+        harpTopY,
+        harpTopY + finialHeight,
+        PROFILE_ROWS,
+        RADIAL_SEGMENTS,
+      ),
+      MATERIALS.socket,
+      confidenceOf(params, ['shadeTopDiameter']),
+      ['shadeTopDiameter'],
     ),
   );
 
