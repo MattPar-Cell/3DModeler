@@ -1,7 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { loftGeometry, meshVolume } from './loft.ts';
-import { circleRing, revolveProfile, sampleProfile, superellipseRing } from './profile.ts';
+import { loftGeometry, meshVolume, ringStackVolume } from './loft.ts';
+import {
+  circleRing,
+  revolveProfile,
+  ringCircumference,
+  sampleProfile,
+  superellipseRing,
+  superellipseRingForCircumference,
+} from './profile.ts';
 import { ellipseAxesFromPerimeter, ellipsePerimeter } from './math.ts';
 
 const SEGMENTS = 64;
@@ -132,5 +139,40 @@ test('ellipse perimeter inversion round-trips', () => {
     const { a, b } = ellipseAxesFromPerimeter(target, ratio);
     assert.ok(Math.abs(ellipsePerimeter(a, b) - target) < 1e-6);
     assert.ok(Math.abs(b / a - ratio) < 1e-9);
+  }
+});
+
+test('ringStackVolume agrees exactly with the built geometry', () => {
+  const rings = revolveProfile(
+    [
+      { t: 0, radius: 4 },
+      { t: 0.5, radius: 7 },
+      { t: 1, radius: 2 },
+    ],
+    0,
+    20,
+    10,
+    SEGMENTS,
+  );
+  const fromGeometry = meshVolume(loftGeometry(rings));
+  const fromRings = ringStackVolume(rings);
+  assert.ok(
+    Math.abs(fromGeometry - fromRings) / fromGeometry < 1e-5,
+    `${fromRings} != ${fromGeometry}`,
+  );
+});
+
+test('a ring sized for a circumference has exactly that circumference', () => {
+  for (const target of [45, 78.5, 102, 33]) {
+    for (const ratio of [1, 0.72, 0.94]) {
+      for (const n of [2, 2.45, 2.1]) {
+        const ring = superellipseRingForCircumference(target, ratio, n, 0, 48);
+        const actual = ringCircumference(ring);
+        assert.ok(
+          Math.abs(actual - target) < 1e-6,
+          `C=${target} r=${ratio} n=${n}: got ${actual}`,
+        );
+      }
+    }
   }
 });

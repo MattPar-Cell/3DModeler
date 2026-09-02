@@ -112,3 +112,71 @@ export function revolveProfile(
   }
   return rings;
 }
+
+/**
+ * Perimeter of a unit super-ellipse (semi-axis `a` = 1, `b` = `ratio`).
+ *
+ * A super-ellipse has no closed-form perimeter, so this integrates the sampled
+ * polygon. Perimeter is linear in `a` at fixed `ratio` and `n`, which is what
+ * makes {@link superellipseRingForCircumference} exact: scale by the target
+ * circumference over this value and the ring's perimeter *is* the target.
+ */
+const unitPerimeterCache = new Map<string, number>();
+
+export function superellipseUnitPerimeter(ratio: number, n: number, samples = 512): number {
+  // The body fitter evaluates this thousands of times inside its search loop,
+  // almost always for the same handful of (ratio, n) pairs.
+  const cacheKey = `${ratio}|${n}|${samples}`;
+  const cached = unitPerimeterCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
+  const ring = superellipseRing(1, ratio, n, 0, samples);
+  let total = 0;
+  for (let i = 0; i < ring.length; i += 1) {
+    const p = ring[i];
+    const q = ring[(i + 1) % ring.length];
+    if (p === undefined || q === undefined) continue;
+    total += Math.hypot(q.x - p.x, q.z - p.z);
+  }
+  unitPerimeterCache.set(cacheKey, total);
+  return total;
+}
+
+/**
+ * A super-ellipse ring whose perimeter equals `circumference`.
+ *
+ * This is how a tape-measure reading becomes geometry: the user's chest
+ * circumference is reproduced exactly (to polygon discretisation), while the
+ * cross-section's *shape* — how much wider than deep it is, and how far from
+ * elliptical — comes from the anthropometric priors.
+ *
+ * @param circumference Target perimeter, cm.
+ * @param ratio Depth / width of the cross-section.
+ * @param n Super-ellipse squareness exponent.
+ */
+export function superellipseRingForCircumference(
+  circumference: number,
+  ratio: number,
+  n: number,
+  y: number,
+  segments: number,
+  centre: { x: number; z: number } = { x: 0, z: 0 },
+): Ring {
+  if (circumference <= 0) return circleRing(0, y, segments, centre);
+  // Measure the unit perimeter at the ring's own resolution, so the polygon we
+  // actually emit has the requested perimeter rather than its smooth limit.
+  const a = circumference / superellipseUnitPerimeter(ratio, n, segments);
+  return superellipseRing(a, a * ratio, n, y, segments, centre);
+}
+
+/** Perimeter of a ring's polygon, projected onto the XZ plane. */
+export function ringCircumference(ring: Ring): number {
+  let total = 0;
+  for (let i = 0; i < ring.length; i += 1) {
+    const p = ring[i];
+    const q = ring[(i + 1) % ring.length];
+    if (p === undefined || q === undefined) continue;
+    total += Math.hypot(q.x - p.x, q.y - p.y, q.z - p.z);
+  }
+  return total;
+}

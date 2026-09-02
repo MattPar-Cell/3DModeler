@@ -25,8 +25,12 @@ export const PROVENANCE_COLORS: Record<Provenance, string> = {
   estimated: '#d8a34a',
 };
 
-/** Opacity applied to parts shaped only by priors, per the confidence UX rule. */
-const ESTIMATED_OPACITY = 0.5;
+/**
+ * Opacity applied to parts shaped only by priors, per the confidence UX rule.
+ * Drawn double-sided at this value, an estimated region reads as a ghost of
+ * itself — present, but visibly less certain than the parts around it.
+ */
+const ESTIMATED_OPACITY = 0.34;
 
 export interface ViewerProps {
   readonly parts: readonly GeneratedPart[];
@@ -48,7 +52,12 @@ function Parts({ parts, confidenceShading }: { parts: readonly GeneratedPart[]; 
           part.confidence === 'estimated' ? ESTIMATED_OPACITY : 1,
         );
         return (
-          <mesh key={part.id} geometry={part.geometry} castShadow receiveShadow>
+          <mesh
+            key={part.id}
+            geometry={part.geometry}
+            castShadow={!translucent}
+            receiveShadow={!translucent}
+          >
             <meshStandardMaterial
               color={confidenceShading ? PROVENANCE_COLORS[part.confidence] : part.color}
               roughness={part.roughness}
@@ -56,7 +65,10 @@ function Parts({ parts, confidenceShading }: { parts: readonly GeneratedPart[]; 
               transparent={translucent}
               opacity={opacity}
               depthWrite={!translucent}
-              side={part.doubleSided ? DoubleSide : FrontSide}
+              // A translucent region is drawn double-sided so its far wall shows
+              // through: single-sided it reads as a hole cut in the body rather
+              // than as a volume the app is less sure about.
+              side={part.doubleSided || translucent ? DoubleSide : FrontSide}
             />
           </mesh>
         );

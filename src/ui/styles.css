@@ -244,3 +244,57 @@ button.primary:disabled, button.secondary:disabled { opacity: 0.5; cursor: defau
 .stat-strip .stat { text-align: right; }
 .stat-strip .stat-label { color: var(--faint); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; }
 .stat-strip .stat-value { font-variant-numeric: tabular-nums; font-size: 13px; }
+
+/* --- region confidence list --------------------------------------------- */
+
+.regions { display: flex; flex-direction: column; gap: 1px; }
+
+.region-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: 5px;
+  font-size: 12px;
+}
+.region-row:hover { background: #1f232a; }
+.region-row .region-name { flex: 1; }
+.region-row .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+  border: 1px solid currentColor;
+}
+.region-row[data-provenance='measured'] .dot { color: var(--measured); background: var(--measured); }
+.region-row[data-provenance='derived'] .dot { color: var(--derived); background: var(--derived); }
+.region-row[data-provenance='estimated'] .dot { color: var(--estimated); background: transparent; }
+.region-row[data-provenance='estimated'] .region-name { color: var(--muted); font-style: italic; }
+.region-row .region-tag { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--faint); }
+
+/* --- residuals ----------------------------------------------------------- */
+
+.residual-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.residual-table th {
+  text-align: right;
+  font-weight: 500;
+  color: var(--faint);
+  font-size: 11px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--line);
+}
+.residual-table th:first-child { text-align: left; }
+.residual-table td { padding: 4px 0; border-bottom: 1px solid #23272f; text-align: right; font-variant-numeric: tabular-nums; }
+.residual-table td:first-child { text-align: left; }
+.residual-table td.err-ok { color: var(--measured); }
+.residual-table td.err-warn { color: var(--estimated); }
+.residual-table td.err-bad { color: var(--danger); }
+
+.summary-line {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--muted);
+  padding: 6px 0 0;
+}
+.summary-line strong { color: var(--text); font-variant-numeric: tabular-nums; font-weight: 600; }

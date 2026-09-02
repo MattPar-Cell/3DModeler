@@ -227,3 +227,56 @@ export function meshVolume(geometry: BufferGeometry): number {
   }
   return total;
 }
+
+/**
+ * Volume enclosed by a capped ring stack, without building a geometry.
+ *
+ * Uses the same triangulation and winding as {@link loftGeometry}, so the two
+ * agree exactly — a unit test pins that. The body fitter evaluates this inside
+ * a search loop, where allocating a BufferGeometry per trial would dominate the
+ * cost.
+ */
+export function ringStackVolume(rings: readonly Ring[]): number {
+  if (rings.length < 2) return 0;
+  const segments = rings[0]?.length ?? 0;
+  if (segments < 3) return 0;
+
+  const tet = (a: Vec3, b: Vec3, c: Vec3): number =>
+    (a.x * (b.y * c.z - b.z * c.y) -
+      a.y * (b.x * c.z - b.z * c.x) +
+      a.z * (b.x * c.y - b.y * c.x)) /
+    6;
+
+  let total = 0;
+  for (let i = 0; i < rings.length - 1; i += 1) {
+    const lower = rings[i];
+    const upper = rings[i + 1];
+    if (lower === undefined || upper === undefined) continue;
+    for (let j = 0; j < segments; j += 1) {
+      const k = (j + 1) % segments;
+      const a = lower[j];
+      const b = lower[k];
+      const c = upper[k];
+      const d = upper[j];
+      if (a === undefined || b === undefined || c === undefined || d === undefined) continue;
+      total += tet(a, d, c) + tet(a, c, b);
+    }
+  }
+
+  // Caps, wound to match loftGeometry's fans.
+  const cap = (ring: Ring, up: boolean): void => {
+    const centre = centroid(ring);
+    for (let j = 0; j < segments; j += 1) {
+      const a = ring[j];
+      const b = ring[(j + 1) % segments];
+      if (a === undefined || b === undefined) continue;
+      total += up ? tet(centre, b, a) : tet(centre, a, b);
+    }
+  };
+  const first = rings[0];
+  const last = rings[rings.length - 1];
+  if (first !== undefined) cap(first, false);
+  if (last !== undefined) cap(last, true);
+
+  return total;
+}
