@@ -20,6 +20,7 @@ export function StatStrip({
 
 const LEGEND: readonly { provenance: Provenance; text: string }[] = [
   { provenance: 'measured', text: 'Measured — you entered this' },
+  { provenance: 'scanned', text: 'Scanned — read off a photograph' },
   { provenance: 'derived', text: 'Derived — computed from a measurement' },
   { provenance: 'estimated', text: 'Estimated — from population priors' },
 ];

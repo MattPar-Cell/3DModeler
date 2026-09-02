@@ -3,6 +3,7 @@ import { Group } from 'three';
 import { useLampStore } from '../state/lampStore.ts';
 import { buildLamp } from '../templates/lamp/build.ts';
 import { disposeModel } from '../templates/types.ts';
+import { isObserved } from '../core/params.ts';
 import {
   LAMP_MEASUREMENT_KEYS,
   LAMP_PARAM_SPECS,
@@ -19,6 +20,7 @@ import { SaveForComparison } from './SaveForComparison.tsx';
 export function LampWorkspace() {
   const entered = useLampStore((s) => s.entered);
   const drafts = useLampStore((s) => s.drafts);
+  const sources = useLampStore((s) => s.sources);
   const proportion = useLampStore((s) => s.proportion);
   const setDraft = useLampStore((s) => s.setDraft);
   const clearMeasurement = useLampStore((s) => s.clearMeasurement);
@@ -31,8 +33,8 @@ export function LampWorkspace() {
 
   // The model is a pure function of the parameters, rebuilt on every change.
   const model = useMemo(
-    () => buildLamp({ measurements: entered, proportion }),
-    [entered, proportion],
+    () => buildLamp({ measurements: entered, sources, proportion }),
+    [entered, sources, proportion],
   );
 
   // Geometry is the one thing here that owns GPU memory, so release the
@@ -47,7 +49,7 @@ export function LampWorkspace() {
   useEffect(() => () => disposeModel(previous.current), []);
 
   const measuredCount = LAMP_MEASUREMENT_KEYS.filter(
-    (key) => model.params[key].provenance === 'measured',
+    (key) => isObserved(model.params[key].provenance),
   ).length;
 
   const derivedKeys: LampParamKey[] = [

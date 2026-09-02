@@ -21,6 +21,7 @@ export const SCENE_SCALE = 0.01;
 /** Colours used when confidence shading is on. Must match the CSS legend. */
 export const PROVENANCE_COLORS: Record<Provenance, string> = {
   measured: '#6ee7a8',
+  scanned: '#4fc7c7',
   derived: '#7fb2ff',
   estimated: '#d8a34a',
 };

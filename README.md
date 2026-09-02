@@ -33,11 +33,12 @@ Node's native type stripping, which is why there is no test runner in
 
 A **parameter** is not just a number. It is a number plus its *provenance*:
 
-| Provenance  | Meaning                                                       |
-|-------------|---------------------------------------------------------------|
-| `measured`  | The user typed it. No solver is ever allowed to overwrite it. |
-| `derived`   | Computed from something that traces back to a measurement.    |
-| `estimated` | Filled in from a template ratio or a population prior.        |
+| Provenance  | Meaning                                                        |
+|-------------|----------------------------------------------------------------|
+| `measured`  | The user typed it. No solver is ever allowed to overwrite it.  |
+| `scanned`   | Read off a photograph. Pinned like a measurement, labelled apart. |
+| `derived`   | Computed from something that traces back to an observation.    |
+| `estimated` | Filled in from a template ratio or a population prior.         |
 
 Provenance is the backbone of the whole UI. It decides how a sidebar field is
 drawn (solid / dashed / dotted border, plus a text badge — never colour alone),
@@ -66,6 +67,12 @@ src/
       defaults.ts  proportion ratios, each with the convention it comes from
       solve.ts     measurements → complete parameter set + constraint reports
       build.ts     parameter set → parts
+  scan/
+    segment.ts     background estimation, thresholding, cleanup
+    silhouette.ts  outline extraction and the landmark searches
+    extract.ts     silhouette -> template measurements
+    project.ts     a generated model's own outline, for overlay and tests
+    load.ts        the only file in the scanner that touches the DOM
   compare/
     snapshots.ts   saved models, layout and measurement diffing
   body/
@@ -342,6 +349,91 @@ And two tables:
   nothing to say to each other, and inventing a row that pairs them would be
   worse than showing none.
 
+## Feature 4 — scanning a photograph
+
+Photograph a lamp or a person, and the app reads measurements off the outline.
+
+**The image never becomes geometry.** It becomes a handful of numbers, which go
+through the same solver as a typed measurement and generate the same mesh — so
+the premise survives the scanner intact: nothing is imported but parameters.
+Everything runs in the browser tab; there is no server in this app to upload an
+image to, and the image is discarded when the tab closes.
+
+### The pipeline
+
+1. **Segment.** Estimate the background from the *median* of the frame's border
+   band, score every pixel by its distance from it (chroma weighted above
+   brightness, so a shadow on the backdrop is not subject), threshold with
+   Otsu's method, open and close to remove speckle and pinholes, keep the
+   largest connected region, and fill enclosed holes.
+2. **Outline.** Reduce the mask to a left and right edge per row, plus the run
+   straddling the subject's midline.
+3. **Measure.** Every reading is a question about that outline: how tall is it,
+   how wide at this height, where does it pinch, where does the midline stop
+   being covered.
+
+Not a neural network, deliberately. A classical pipeline's failure modes are
+predictable and explainable, which matters more for a tool whose output becomes
+a measurement than a cleverer method whose errors are not.
+
+### Scale
+
+A photograph has no absolute size. Either give the subject's overall height, or
+click two points across something of known length. Without one of those, nothing
+below is a measurement.
+
+### What it reads
+
+**A lamp** has an unmistakable width profile — wide foot, pinched stem, wide
+shade. Finding the pinch locates all three regions at once, without assuming
+their proportions, which is exactly the point: the template assumes the
+proportions, and the scan's job is to replace those assumptions with what the
+photograph shows.
+
+**A body** gives its height directly, and its inseam from the height at which
+the midline stops being covered — the crotch. That is a real anatomical
+landmark rather than a guessed fraction of stature, and it is the one body
+length a single photograph gives outright. Torso widths are then sampled at
+landmark heights *reconciled with that inseam*, exactly as `buildSkeleton` does,
+and converted to circumferences through the same super-ellipse sections the
+model is built from.
+
+### What it refuses to read
+
+The scanner withholds numbers rather than reporting bad ones, because a
+measurement that looks authoritative and is not is worse than no measurement:
+
+* **Arms down → no girths.** With the arms against the body, the run through the
+  chest is arm-torso-arm fused into one, and its width is the span of the arms.
+  On a real subject that read as a 164 cm waist for an 80 cm one. A row through
+  an A-pose has three runs; one run means the pose is wrong, and chest, waist,
+  hip and neck are not reported at all.
+* **No neck → no neck.** A neck is a *local* minimum between the shoulders and
+  the jaw. Hair or a collar leaves no such minimum, and the search then returns
+  the head — a 72 cm neck. If the outline does not widen again above the pinch,
+  nothing is reported.
+* **No leg gap → no inseam.**
+* **Weight, ever.** A silhouette says nothing about mass.
+
+Everything else it can only caveat: a cropped subject, a subject filling too
+little of the frame, and always the reminder that a photograph has perspective.
+
+### Depth
+
+One photograph gives width, not girth. A front-only scan pairs a measured width
+with a depth from the anthropometric priors, and says so. Add a side view and
+the section's total depth is measured too — only the front/back *split* stays a
+prior, which is a far weaker assumption: it moves where the volume sits, not how
+much there is.
+
+### Checking the result
+
+The reconstruction's own outline is drawn back over the photograph. That is the
+only honest way to judge a scan, and it is what makes the whole pipeline
+testable without a single fixture image: generate a model, project its outline,
+rasterise that into a synthetic photograph, scan it, and check the measurements
+come back.
+
 ## Code quality
 
 * Strict TypeScript with `noUncheckedIndexedAccess` and
@@ -353,10 +445,12 @@ And two tables:
 * Anthropometric and template constants live in dedicated modules with the
   source of each figure in a comment, including where a figure is uncertain or
   where two published definitions disagree.
-* 98 unit tests covering the geometry core, the lamp solver, the body fit and
-  the comparison logic — reconstruction errors, constraint repair, provenance
-  propagation, winding, interpolation overshoot, degenerate inputs, and
-  agreement with outside population data.
+* 120 unit tests covering the geometry core, the lamp solver, the body fit, the
+  comparison logic and the whole scanning pipeline — reconstruction errors,
+  constraint repair, provenance propagation, winding, interpolation overshoot,
+  degenerate inputs, and agreement with outside population data. The scanner is
+  tested against the app itself, with synthetic photographs generated from
+  generated models, so no fixture images live in the repository.
 
 ## Tests
 
@@ -378,10 +472,15 @@ because each one caught a real bug:
 | The generated mesh is exactly as tall as the entered height | A finial that pushed the lamp past the height the user typed |
 | The spine curve does not corrupt torso circumferences | A limb-style tilt correction applied to a torso, putting 0.6 cm into every chest reading |
 | Side-by-side layout never overlaps | — |
+| A lamp survives model → photograph → scan | A projection that sampled vertices and left horizontal slots through the outline wherever a part's rings were sparser than the sampling rows |
+| Girths are withheld when the arms are down | A silhouette measuring arm-span as waist, and reporting it with only a caveat |
+| A neck is only reported when the outline has one | A head reported as a 72 cm neck |
 
 ## Non-goals
 
-No photogrammetry, no image-to-3D, no file imports, no backend. Shading is clean
+No image-to-3D model inference and no backend. The scanner is classical image
+processing over a silhouette, not a learned model, and it produces measurements
+rather than geometry. Shading is clean
 matte studio lighting; photorealism is not attempted, and the figure is a
 measurement aid rather than a portrait — it has no face, and the skin tone is
 deliberately a neutral clay.

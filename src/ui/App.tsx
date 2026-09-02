@@ -2,9 +2,10 @@ import { useState } from 'react';
 import { LampWorkspace } from './LampWorkspace.tsx';
 import { BodyWorkspace } from './BodyWorkspace.tsx';
 import { CompareWorkspace } from './CompareWorkspace.tsx';
+import { ScanWorkspace } from './ScanWorkspace.tsx';
 import { useComparisonStore } from '../state/comparisonStore.ts';
 
-type Mode = 'object' | 'body' | 'compare';
+type Mode = 'object' | 'body' | 'scan' | 'compare';
 
 /**
  * App shell. Two reconstruction recipes share one philosophy: store the
@@ -42,6 +43,15 @@ export function App() {
             type="button"
             role="tab"
             className="tab"
+            aria-selected={mode === 'scan'}
+            onClick={() => setMode('scan')}
+          >
+            Scan a photo
+          </button>
+          <button
+            type="button"
+            role="tab"
+            className="tab"
             aria-selected={mode === 'compare'}
             onClick={() => setMode('compare')}
           >
@@ -51,6 +61,7 @@ export function App() {
       </header>
       {mode === 'object' && <LampWorkspace />}
       {mode === 'body' && <BodyWorkspace />}
+      {mode === 'scan' && <ScanWorkspace />}
       {mode === 'compare' && <CompareWorkspace />}
     </div>
   );

@@ -12,10 +12,56 @@
 export type Provenance =
   /** Entered directly by the user. Treated as ground truth by every solver. */
   | 'measured'
-  /** Computed from measured values via a template ratio or a fitted model. */
+  /**
+   * Read off a photograph by the scanner.
+   *
+   * An observation of this specific object, so the solvers pin it exactly as
+   * they pin a typed measurement — but it carries the error of a silhouette
+   * read through a lens, which a tape does not, so it is reported separately
+   * rather than quietly promoted to `measured`.
+   */
+  | 'scanned'
+  /** Computed from observed values via a template ratio or a fitted model. */
   | 'derived'
   /** Filled in from a population prior because nothing constrains it. */
   | 'estimated';
+
+/**
+ * True when the value came from this specific object rather than from a
+ * calculation or a population. Both kinds of observation are pinned by the
+ * solvers and never rewritten to satisfy a constraint.
+ */
+export function isObserved(provenance: Provenance): boolean {
+  return provenance === 'measured' || provenance === 'scanned';
+}
+
+/** Confidence order, most certain first. */
+const PROVENANCE_RANK: Record<Provenance, number> = {
+  measured: 0,
+  scanned: 1,
+  derived: 2,
+  estimated: 3,
+};
+
+/** The least certain of the given provenances. */
+export function worstProvenance(values: readonly Provenance[]): Provenance {
+  let worst: Provenance = 'measured';
+  for (const value of values) {
+    if (PROVENANCE_RANK[value] > PROVENANCE_RANK[worst]) worst = value;
+  }
+  return worst;
+}
+
+/** How a measurement reached the app. */
+export type MeasurementSource = 'manual' | 'scanned';
+
+/** Per-key record of how each measurement was obtained. */
+export type Sources<K extends string> = { readonly [P in K]?: MeasurementSource };
+
+/** The provenance an observed value should carry, given how it arrived. */
+export function observedProvenance(source: MeasurementSource | undefined): Provenance {
+  return source === 'scanned' ? 'scanned' : 'measured';
+}
 
 /** Physical unit of a parameter. The app is metric end to end. */
 export type Unit = 'cm' | 'kg' | 'deg' | 'ratio';

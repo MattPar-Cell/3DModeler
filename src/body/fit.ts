@@ -1,5 +1,11 @@
-import type { ConstraintReport, Provenance, ResolvedParam, Unit } from '../core/params.ts';
-import { resolve } from '../core/params.ts';
+import type {
+  ConstraintReport,
+  Provenance,
+  ResolvedParam,
+  Sources,
+  Unit,
+} from '../core/params.ts';
+import { isObserved, observedProvenance, resolve } from '../core/params.ts';
 import { clamp, isPositiveFinite } from '../core/math.ts';
 import { goldenSectionMinimize } from '../core/optimize.ts';
 import * as A from '../constants/anthropometry.ts';
@@ -144,6 +150,12 @@ export interface BodyFit {
 
 export interface BodyFitInput {
   readonly measurements: BodyMeasurements;
+  /**
+   * How each measurement arrived. Absent keys count as typed by hand. A scanned
+   * value is pinned exactly as a typed one is; the only difference is what the
+   * parameter and its region report about themselves afterwards.
+   */
+  readonly sources?: Sources<BodyMeasurementKey>;
 }
 
 function entered(m: BodyMeasurements, key: BodyMeasurementKey): number | undefined {
@@ -152,13 +164,18 @@ function entered(m: BodyMeasurements, key: BodyMeasurementKey): number | undefin
 }
 
 /** Stature, and where it came from. */
-function solveStature(m: BodyMeasurements): {
+function solveStature(
+  m: BodyMeasurements,
+  sources: Sources<BodyMeasurementKey> | undefined,
+): {
   value: number;
   provenance: Provenance;
   note?: string;
 } {
   const direct = entered(m, 'stature');
-  if (direct !== undefined) return { value: direct, provenance: 'measured' };
+  if (direct !== undefined) {
+    return { value: direct, provenance: observedProvenance(sources?.stature) };
+  }
 
   const accumulate = (
     sources: readonly { key: BodyMeasurementKey; ratio: number; weight: number }[],
@@ -295,9 +312,12 @@ export function priorBody(stature: number): BodyValues {
 export function fitBody(input: BodyFitInput): BodyFit {
   const m = input.measurements;
   const constraints: ConstraintReport[] = [];
+  /** The provenance an entered value carries, given how it reached the app. */
+  const observed = (key: BodyMeasurementKey): Provenance =>
+    observedProvenance(input.sources?.[key]);
 
   // --- Stature -------------------------------------------------------------
-  const statureSolution = solveStature(m);
+  const statureSolution = solveStature(m, input.sources);
   const statureParam = resolve(
     BODY_PARAM_SPECS.stature,
     statureSolution.value,
@@ -362,7 +382,8 @@ export function fitBody(input: BodyFitInput): BodyFit {
 
   // --- Provenance ----------------------------------------------------------
   const girthProvenance = (key: BodyParamKey, group: readonly BodyParamKey[]): Provenance => {
-    if (entered(m, key as BodyMeasurementKey) !== undefined) return 'measured';
+    if (entered(m, key as BodyMeasurementKey) !== undefined)
+      return observed(key as BodyMeasurementKey);
     const ownGroup = group === TORSO_GIRTHS ? torsoMeasured : limbMeasured;
     // Derived when something *directly comparable* informed it: another
     // measurement in the same group, or the entered weight. A factor borrowed
@@ -392,7 +413,7 @@ export function fitBody(input: BodyFitInput): BodyFit {
     mass: resolve(
       BODY_PARAM_SPECS.mass,
       values.mass,
-      massMeasured !== undefined ? 'measured' : 'derived',
+      massMeasured !== undefined ? observed('mass') : 'derived',
       massMeasured !== undefined
         ? undefined
         : 'Implied by the reconstructed volume at a body density of 1.01 kg/L.',
@@ -417,13 +438,13 @@ export function fitBody(input: BodyFitInput): BodyFit {
     shoulderWidth: resolve(
       BODY_PARAM_SPECS.shoulderWidth,
       values.shoulderWidth,
-      entered(m, 'shoulderWidth') !== undefined ? 'measured' : lengthProvenance,
+      entered(m, 'shoulderWidth') !== undefined ? observed('shoulderWidth') : lengthProvenance,
     ),
     hipWidth: resolve(BODY_PARAM_SPECS.hipWidth, values.hipWidth, lengthProvenance),
     inseam: resolve(
       BODY_PARAM_SPECS.inseam,
       values.inseam,
-      entered(m, 'inseam') !== undefined ? 'measured' : lengthProvenance,
+      entered(m, 'inseam') !== undefined ? observed('inseam') : lengthProvenance,
       values.inseam !== entered(m, 'inseam') && entered(m, 'inseam') !== undefined
         ? 'Adjusted to leave room for a torso at this height.'
         : undefined,
@@ -436,7 +457,7 @@ export function fitBody(input: BodyFitInput): BodyFit {
     forearmLength: resolve(
       BODY_PARAM_SPECS.forearmLength,
       values.forearmLength,
-      entered(m, 'forearmLength') !== undefined ? 'measured' : lengthProvenance,
+      entered(m, 'forearmLength') !== undefined ? observed('forearmLength') : lengthProvenance,
     ),
     handLength: resolve(BODY_PARAM_SPECS.handLength, values.handLength, lengthProvenance),
     footLength: resolve(BODY_PARAM_SPECS.footLength, values.footLength, lengthProvenance),
@@ -497,8 +518,13 @@ export function fitBody(input: BodyFitInput): BodyFit {
       provenance: params[key].provenance,
     }));
     let provenance: Provenance = 'estimated';
-    if (drivenBy.some((item) => item.provenance === 'measured')) provenance = 'measured';
-    else if (drivenBy.some((item) => item.provenance === 'derived')) provenance = 'derived';
+    const observedHere = drivenBy.filter((item) => isObserved(item.provenance));
+    if (observedHere.length > 0) {
+      // A region measured by tape outranks one read off a photograph.
+      provenance = observedHere.some((item) => item.provenance === 'measured')
+        ? 'measured'
+        : 'scanned';
+    } else if (drivenBy.some((item) => item.provenance === 'derived')) provenance = 'derived';
     return { region, label: REGION_LABELS[region], provenance, drivenBy };
   });
 

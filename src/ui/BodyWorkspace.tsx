@@ -3,6 +3,7 @@ import { Group } from 'three';
 import { useBodyStore } from '../state/bodyStore.ts';
 import { buildBody } from '../body/build.ts';
 import { disposeModel } from '../templates/types.ts';
+import { isObserved } from '../core/params.ts';
 import { BODY_MEASUREMENT_GROUPS, BODY_MEASUREMENT_KEYS, BODY_PARAM_SPECS } from '../body/spec.ts';
 import type { BodyParamKey } from '../body/spec.ts';
 import type { Residual } from '../body/fit.ts';
@@ -31,6 +32,7 @@ const REPORTED_PARAMS: readonly BodyParamKey[] = [
 export function BodyWorkspace() {
   const entered = useBodyStore((s) => s.entered);
   const drafts = useBodyStore((s) => s.drafts);
+  const sources = useBodyStore((s) => s.sources);
   const setDraft = useBodyStore((s) => s.setDraft);
   const clearMeasurement = useBodyStore((s) => s.clearMeasurement);
   const reset = useBodyStore((s) => s.reset);
@@ -40,7 +42,7 @@ export function BodyWorkspace() {
   const [confidenceShading, setConfidenceShading] = useState(false);
   const rootRef = useRef<Group | null>(null);
 
-  const model = useMemo(() => buildBody({ measurements: entered }), [entered]);
+  const model = useMemo(() => buildBody({ measurements: entered, sources }), [entered, sources]);
 
   const previous = useRef(model);
   useEffect(() => {
@@ -52,7 +54,7 @@ export function BodyWorkspace() {
   useEffect(() => () => disposeModel(previous.current), []);
 
   const measuredCount = BODY_MEASUREMENT_KEYS.filter(
-    (key) => model.params[key].provenance === 'measured',
+    (key) => isObserved(model.params[key].provenance),
   ).length;
 
   return (

@@ -1,3 +1,4 @@
+import { isObserved } from '../core/params.ts';
 import type { ConstraintReport, ParamSpec, Provenance, ResolvedParam } from '../core/params.ts';
 
 /**
@@ -10,6 +11,7 @@ import type { ConstraintReport, ParamSpec, Provenance, ResolvedParam } from '../
 
 const PROVENANCE_LABEL: Record<Provenance, string> = {
   measured: 'measured',
+  scanned: 'scanned',
   derived: 'derived',
   estimated: 'estimated',
 };
@@ -39,7 +41,7 @@ export function MeasurementField({
   onChange,
   onClear,
 }: MeasurementFieldProps) {
-  const measured = resolved.provenance === 'measured';
+  const observed = isObserved(resolved.provenance);
   // When the value is inferred, show the solver's number as a placeholder so
   // the user can see what the template chose without it looking entered.
   const placeholder = resolved.value.toFixed(1);
@@ -69,9 +71,9 @@ export function MeasurementField({
           type="button"
           className="icon-btn"
           onClick={onClear}
-          disabled={!measured}
+          disabled={!observed}
           title={
-            measured
+            observed
               ? 'Clear this measurement and let the template infer it'
               : 'Nothing entered — this value is already inferred'
           }
@@ -80,9 +82,11 @@ export function MeasurementField({
         </button>
       </div>
       <p className="note" id={`d-${spec.key}`}>
-        {measured
-          ? `Plausible range ${spec.min}–${spec.max} ${spec.unit}.`
-          : (resolved.note ?? spec.description)}
+        {resolved.provenance === 'scanned'
+          ? (resolved.note ?? 'Read off a photograph. Edit to override with a tape measurement.')
+          : observed
+            ? `Plausible range ${spec.min}–${spec.max} ${spec.unit}.`
+            : (resolved.note ?? spec.description)}
       </p>
     </div>
   );

@@ -1,5 +1,10 @@
-import type { ConstraintReport, Provenance, ResolvedParam } from '../../core/params.ts';
-import { resolve } from '../../core/params.ts';
+import type {
+  ConstraintReport,
+  Provenance,
+  ResolvedParam,
+  Sources,
+} from '../../core/params.ts';
+import { isObserved, observedProvenance, resolve } from '../../core/params.ts';
 import { clamp, isPositiveFinite } from '../../core/math.ts';
 import {
   BASE_DIAMETER_OVER_TOTAL_HEIGHT,
@@ -30,6 +35,12 @@ export interface LampSolveInput {
    * which is what makes them render as "estimated" rather than "measured".
    */
   readonly measurements: LampMeasurements;
+  /**
+   * How each measurement arrived. Absent keys count as typed by hand. The
+   * solver pins a scanned value exactly as it pins a typed one; the only
+   * difference is what the parameter reports about itself afterwards.
+   */
+  readonly sources?: Sources<LampMeasurementKey>;
   /**
    * Proportion lock, {@link PROPORTION_MIN}-{@link PROPORTION_MAX}. Scales every
    * *inferred* dimension while leaving entered measurements pinned at exactly
@@ -66,6 +77,9 @@ export function solveLamp(input: LampSolveInput): LampSolution {
   const m = input.measurements;
   const p = clamp(input.proportion ?? 1, PROPORTION_MIN, PROPORTION_MAX);
   const constraints: ConstraintReport[] = [];
+  /** The provenance an entered value carries, given how it reached the app. */
+  const observed = (key: LampMeasurementKey): Provenance =>
+    observedProvenance(input.sources?.[key]);
 
   // --- 1. Anchors ---------------------------------------------------------
   const totalHeightEntered = entered(m, 'totalHeight');
@@ -73,7 +87,7 @@ export function solveLamp(input: LampSolveInput): LampSolution {
   const totalHeightParam = resolve(
     LAMP_PARAM_SPECS.totalHeight,
     totalHeight,
-    totalHeightEntered === undefined ? 'estimated' : 'measured',
+    totalHeightEntered === undefined ? 'estimated' : observed('totalHeight'),
   );
   const H = totalHeightParam.value;
 
@@ -82,7 +96,11 @@ export function solveLamp(input: LampSolveInput): LampSolution {
 
   let baseDiameterParam: ResolvedParam;
   if (baseDiameterEntered !== undefined) {
-    baseDiameterParam = resolve(LAMP_PARAM_SPECS.baseDiameter, baseDiameterEntered, 'measured');
+    baseDiameterParam = resolve(
+      LAMP_PARAM_SPECS.baseDiameter,
+      baseDiameterEntered,
+      observed('baseDiameter'),
+    );
   } else if (shadeDiameterEntered !== undefined) {
     baseDiameterParam = resolve(
       LAMP_PARAM_SPECS.baseDiameter,
@@ -108,8 +126,8 @@ export function solveLamp(input: LampSolveInput): LampSolution {
   let stemDiameter = stemDiameterEntered ?? baseDiameter * STEM_DIAMETER_OVER_BASE_DIAMETER * p;
   let stemDiameterProvenance: Provenance =
     stemDiameterEntered !== undefined
-      ? 'measured'
-      : baseDiameterParam.provenance === 'measured'
+      ? observed('stemDiameter')
+      : isObserved(baseDiameterParam.provenance)
         ? 'derived'
         : 'estimated';
   let stemNote =
@@ -150,7 +168,7 @@ export function solveLamp(input: LampSolveInput): LampSolution {
         satisfied: true,
         resolution: 'Widened the inferred base neck around the measured stem.',
       });
-    } else if (baseDiameterParam.provenance !== 'measured') {
+    } else if (!isObserved(baseDiameterParam.provenance)) {
       baseDiameter = Math.min(
         neededNeck / BASE_TOP_OVER_BOTTOM_DIAMETER,
         LAMP_PARAM_SPECS.baseDiameter.max,
@@ -179,11 +197,11 @@ export function solveLamp(input: LampSolveInput): LampSolution {
   // --- 3. Shade, and the constraint that it may not be narrower than the base
   const shadeDiameterParam =
     shadeDiameterEntered !== undefined
-      ? resolve(LAMP_PARAM_SPECS.shadeDiameter, shadeDiameterEntered, 'measured')
+      ? resolve(LAMP_PARAM_SPECS.shadeDiameter, shadeDiameterEntered, observed('shadeDiameter'))
       : resolve(
           LAMP_PARAM_SPECS.shadeDiameter,
           baseDiameter * SHADE_DIAMETER_OVER_BASE_DIAMETER * p,
-          baseDiameterParam.provenance === 'measured' ? 'derived' : 'estimated',
+          isObserved(baseDiameterParam.provenance) ? 'derived' : 'estimated',
           `Trade rule: a shade reads correctly at about ${SHADE_DIAMETER_OVER_BASE_DIAMETER}x the base width.`,
         );
 
@@ -197,8 +215,8 @@ export function solveLamp(input: LampSolveInput): LampSolution {
       satisfied: true,
     });
   } else if (
-    baseDiameterParam.provenance === 'measured' &&
-    shadeDiameterParam.provenance === 'measured'
+    isObserved(baseDiameterParam.provenance) &&
+    isObserved(shadeDiameterParam.provenance)
   ) {
     constraints.push({
       id: 'shade-covers-base',
@@ -207,7 +225,7 @@ export function solveLamp(input: LampSolveInput): LampSolution {
       resolution:
         'Both diameters were measured, so neither was rewritten. The lamp is modelled exactly as entered; check the shade measurement if this looks wrong.',
     });
-  } else if (shadeDiameterParam.provenance === 'measured') {
+  } else if (isObserved(shadeDiameterParam.provenance)) {
     baseDiameter = shadeDiameter;
     baseTopDiameter = Math.min(baseTopDiameter, baseDiameter);
     baseNote = 'Narrowed to the measured shade diameter to satisfy the shade-covers-base rule.';
@@ -362,7 +380,7 @@ export function solveLamp(input: LampSolveInput): LampSolution {
     socketDiameter: resolve(
       LAMP_PARAM_SPECS.socketDiameter,
       socketDiameter,
-      stemDiameterProvenance === 'measured' ? 'derived' : 'estimated',
+      isObserved(stemDiameterProvenance) ? 'derived' : 'estimated',
     ),
     shadeHeight: resolve(
       LAMP_PARAM_SPECS.shadeHeight,
